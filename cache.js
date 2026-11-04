@@ -1,6 +1,8 @@
 /**
- * LexiContext AI Pro — File hỗ trợ Smart Cache (cache.js)
- * Đặt cùng cấp với index.html, manifest.json, sw.js trên GitHub.
+ * LexiContext AI Pro — Smart Cache & Cambridge Audio Engine (cache.js)
+ * Tích hợp:
+ * 1. Hệ thống phát âm chuẩn Cambridge 2 giọng: US (Anh-Mỹ) & UK (Anh-Anh) bằng giọng người thật.
+ * 2. Bộ nhớ đệm Smart Cache đa tầng IndexedDB + LocalStorage (tiết kiệm quota Gemini API).
  */
 (function (global) {
   'use strict';
@@ -14,7 +16,9 @@
 
   const memCache = new Map();
   const inFlight = new Map();
+  const audioCache = new Map();
   let dbPromise = null;
+  let currentAudio = null;
 
   function normKey(str) {
     return String(str ?? '')
@@ -44,6 +48,86 @@
     try { if (typeof global.toast === 'function') global.toast(msg); } catch (e) {}
   }
 
+  /* ===== HỆ THỐNG PHÁT ÂM CHUẨN CAMBRIDGE (US / UK) ===== */
+  async function fetchCambridgeAudio(word) {
+    const w = normKey(word);
+    if (!w || w.includes(' ')) return null;
+    if (audioCache.has(w)) return audioCache.get(w);
+
+    try {
+      const r = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(w)}`);
+      if (!r.ok) return null;
+      const data = await r.json();
+      const phonetics = (data && data[0] && data[0].phonetics) || [];
+      
+      let ukAudio = '', usAudio = '';
+      for (const p of phonetics) {
+        const audioUrl = p.audio || '';
+        if (!audioUrl) continue;
+        if (/-(uk|gb)\.mp3$/i.test(audioUrl) && !ukAudio) ukAudio = audioUrl;
+        else if (/-(us)\.mp3$/i.test(audioUrl) && !usAudio) usAudio = audioUrl;
+        else if (!usAudio) usAudio = audioUrl;
+      }
+      const res = { us: usAudio, uk: ukAudio || usAudio };
+      audioCache.set(w, res);
+      return res;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function playNativeTTS(text, lang = 'en-US', rate = 0.92) {
+    if (!('speechSynthesis' in window)) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = lang;
+      u.rate = rate;
+      const voices = speechSynthesis.getVoices();
+      const targetPrefix = lang === 'en-GB' ? /^en[-_](GB|UK)/i : /^en[-_]US/i;
+      const matched = voices.find(v => targetPrefix.test(v.lang) && !/google/i.test(v.name)) || voices.find(v => targetPrefix.test(v.lang));
+      if (matched) u.voice = matched;
+      setTimeout(() => speechSynthesis.speak(u), 60);
+    } catch (e) {}
+  }
+
+  async function speakWord(text, accent = 'us') {
+    text = String(text || '').trim();
+    if (!text) return;
+    if (currentAudio) {
+      try { currentAudio.pause(); } catch (e) {}
+      currentAudio = null;
+    }
+
+    // Nếu là từ đơn: Thử phát file âm thanh giọng người thật Cambridge
+    if (!text.includes(' ') && text.length <= 35) {
+      const audioInfo = await fetchCambridgeAudio(text);
+      const url = audioInfo ? (accent === 'uk' ? audioInfo.uk : audioInfo.us) : null;
+      if (url) {
+        try {
+          currentAudio = new Audio(url);
+          await currentAudio.play();
+          return;
+        } catch (e) {}
+      }
+    }
+
+    // Dự phòng qua Web Speech API giọng chuẩn UK / US
+    playNativeTTS(text, accent === 'uk' ? 'en-GB' : 'en-US');
+  }
+
+  // Ghi đè hàm speak cũ của app để tự động nâng cấp sang giọng Cambridge
+  global.speak = function (text, accent = 'us') {
+    speakWord(text, accent);
+  };
+  global.speakUK = function (text) {
+    speakWord(text, 'uk');
+  };
+  global.speakUS = function (text) {
+    speakWord(text, 'us');
+  };
+
+  /* ===== HỆ THỐNG SMART CACHE ===== */
   function openDB() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve) => {
@@ -187,12 +271,10 @@
     );
   }
 
-  // Tự động đánh chặn các lệnh fetch tới Google Gemini API
   const origFetch = global.fetch.bind(global);
   global.fetch = async function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
 
-    // 1. Cache danh sách Models 24h (tiết kiệm 6 lượt gọi mỗi lần tải lại trang)
     if (url.includes('generativelanguage.googleapis.com/v1beta/models') && !url.includes(':generateContent')) {
       try {
         const cached = JSON.parse(localStorage.getItem(LS_MODELS_KEY) || 'null');
@@ -210,7 +292,6 @@
       return resp;
     }
 
-    // 2. Cache mọi kết quả generateContent
     if (url.includes('generativelanguage.googleapis.com/v1beta/models/') && url.includes(':generateContent') && init && init.body) {
       try {
         const body = JSON.parse(init.body);
