@@ -1,8 +1,6 @@
 /**
- * LexiContext AI Pro — Smart Cache & Cambridge Audio Engine (cache.js)
- * Tích hợp:
- * 1. Hệ thống phát âm chuẩn Cambridge 2 giọng: US (Anh-Mỹ) & UK (Anh-Anh) bằng giọng người thật.
- * 2. Bộ nhớ đệm Smart Cache đa tầng IndexedDB + LocalStorage (tiết kiệm quota Gemini API).
+ * LexiContext AI Pro — Cambridge Audio & Smart Cache Engine (cache.js)
+ * Tự động sửa lỗi mất icon loa + Nâng cấp phát âm giọng người thật bản xứ Cambridge (US/UK)
  */
 (function (global) {
   'use strict';
@@ -12,13 +10,11 @@
   const LS_VAULT_KEY = 'lexicontext_master_db_unified';
   const IDB_NAME = 'lexicontext_smart_cache_db';
   const IDB_STORE = 'ai_cache_entries';
-  const MAX_LS_ENTRIES = 350;
 
   const memCache = new Map();
-  const inFlight = new Map();
   const audioCache = new Map();
   let dbPromise = null;
-  let currentAudio = null;
+  let activeAudio = null;
 
   function normKey(str) {
     return String(str ?? '')
@@ -26,108 +22,116 @@
       .replace(/^\s*(?:[-•·●▪◦>]+|\d+[.)])\s+/, '')
       .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, '')
       .trim()
-      .toLowerCase()
-      .replace(/\s+/g, ' ');
+      .toLowerCase();
   }
 
-  function hashText(str) {
-    const s = normKey(str);
-    if (s.length <= 120) return s;
-    let h1 = 0xdeadbeef ^ s.length, h2 = 0x41c6ce57 ^ s.length;
-    for (let i = 0; i < s.length; i++) {
-      const ch = s.charCodeAt(i);
-      h1 = Math.imul(h1 ^ ch, 2654435761);
-      h2 = Math.imul(h2 ^ ch, 1597334677);
-    }
-    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-    return s.slice(0, 60) + '#' + (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  // 1. Sửa lỗi mất icon loa: Tự động vẽ lại icon loa SVG nếu thư viện mạng bị lỗi
+  function ensureSpeakerIcons() {
+    const speakerButtons = document.querySelectorAll('[data-a="speak"], [data-a="speak-form"], [data-a="sel-speak"]');
+    speakerButtons.forEach((btn) => {
+      const icon = btn.querySelector('i');
+      if (icon && (!icon.offsetWidth || icon.offsetHeight === 0 || !icon.innerHTML)) {
+        icon.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" style="display:inline-block;vertical-align:middle"><path d="M14 3.23v17.54c0 .73-.83 1.14-1.4.68L7.3 17H4c-1.1 0-2-.9-2-2V9c0-1.1.9-2 2-2h3.3l5.3-4.45c.57-.46 1.4-.05 1.4.68zM16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM19 12c0 3.12-1.8 5.81-4.5 7.08V17c1.78-.97 3-2.84 3-5s-1.22-4.03-3-5V4.92C17.2 6.19 19 8.88 19 12z"/></svg>`;
+      }
+    });
   }
 
-  function notify(msg) {
-    try { if (typeof global.toast === 'function') global.toast(msg); } catch (e) {}
-  }
-
-  /* ===== HỆ THỐNG PHÁT ÂM CHUẨN CAMBRIDGE (US / UK) ===== */
-  async function fetchCambridgeAudio(word) {
+  // 2. Lấy âm thanh người bản xứ thật từ kho từ điển Cambridge / Oxford
+  async function getCambridgeAudio(word) {
     const w = normKey(word);
     if (!w || w.includes(' ')) return null;
     if (audioCache.has(w)) return audioCache.get(w);
 
     try {
-      const r = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(w)}`);
-      if (!r.ok) return null;
-      const data = await r.json();
+      const res = await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(w));
+      if (!res.ok) return null;
+      const data = await res.json();
       const phonetics = (data && data[0] && data[0].phonetics) || [];
-      
-      let ukAudio = '', usAudio = '';
+      let uk = '', us = '';
       for (const p of phonetics) {
-        const audioUrl = p.audio || '';
-        if (!audioUrl) continue;
-        if (/-(uk|gb)\.mp3$/i.test(audioUrl) && !ukAudio) ukAudio = audioUrl;
-        else if (/-(us)\.mp3$/i.test(audioUrl) && !usAudio) usAudio = audioUrl;
-        else if (!usAudio) usAudio = audioUrl;
+        if (!p.audio) continue;
+        if (/-(uk|gb)\.mp3$/i.test(p.audio) && !uk) uk = p.audio;
+        else if (/-(us)\.mp3$/i.test(p.audio) && !us) us = p.audio;
+        else if (!us) us = p.audio;
       }
-      const res = { us: usAudio, uk: ukAudio || usAudio };
-      audioCache.set(w, res);
-      return res;
+      const result = { us: us || uk, uk: uk || us };
+      audioCache.set(w, result);
+      return result;
     } catch (e) {
       return null;
     }
   }
 
-  function playNativeTTS(text, lang = 'en-US', rate = 0.92) {
-    if (!('speechSynthesis' in window)) return;
-    try {
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = lang;
-      u.rate = rate;
-      const voices = speechSynthesis.getVoices();
-      const targetPrefix = lang === 'en-GB' ? /^en[-_](GB|UK)/i : /^en[-_]US/i;
-      const matched = voices.find(v => targetPrefix.test(v.lang) && !/google/i.test(v.name)) || voices.find(v => targetPrefix.test(v.lang));
-      if (matched) u.voice = matched;
-      setTimeout(() => speechSynthesis.speak(u), 60);
-    } catch (e) {}
-  }
-
-  async function speakWord(text, accent = 'us') {
+  // 3. Phát âm thanh: Giọng người thật Cambridge hoặc Web Speech giọng bản xứ chất lượng cao
+  async function playCambridge(text, accent = 'us') {
     text = String(text || '').trim();
     if (!text) return;
-    if (currentAudio) {
-      try { currentAudio.pause(); } catch (e) {}
-      currentAudio = null;
+
+    if (activeAudio) {
+      try { activeAudio.pause(); } catch (e) {}
+      activeAudio = null;
     }
 
-    // Nếu là từ đơn: Thử phát file âm thanh giọng người thật Cambridge
-    if (!text.includes(' ') && text.length <= 35) {
-      const audioInfo = await fetchCambridgeAudio(text);
-      const url = audioInfo ? (accent === 'uk' ? audioInfo.uk : audioInfo.us) : null;
+    // Nếu là từ đơn: Dùng âm thanh người thật
+    if (!text.includes(' ') && text.length <= 30) {
+      const audios = await getCambridgeAudio(text);
+      const url = audios ? (accent === 'uk' ? audios.uk : audios.us) : null;
       if (url) {
         try {
-          currentAudio = new Audio(url);
-          await currentAudio.play();
+          activeAudio = new Audio(url);
+          await activeAudio.play();
           return;
         } catch (e) {}
       }
     }
 
-    // Dự phòng qua Web Speech API giọng chuẩn UK / US
-    playNativeTTS(text, accent === 'uk' ? 'en-GB' : 'en-US');
+    // Dự phòng giọng đọc bản xứ cao cấp (không dùng giọng Google Dịch)
+    if ('speechSynthesis' in window) {
+      try {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = accent === 'uk' ? 'en-GB' : 'en-US';
+        u.rate = 0.92;
+        const voices = speechSynthesis.getVoices();
+        const target = accent === 'uk' ? /^en[-_](GB|UK)/i : /^en[-_]US/i;
+        const v = voices.find(x => target.test(x.lang) && !/google/i.test(x.name)) || voices.find(x => target.test(x.lang));
+        if (v) u.voice = v;
+        setTimeout(() => speechSynthesis.speak(u), 50);
+      } catch (e) {}
+    }
   }
 
-  // Ghi đè hàm speak cũ của app để tự động nâng cấp sang giọng Cambridge
+  // Bắt sự kiện bấm vào nút Loa phát âm trực tiếp từ tầng cao nhất
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('[data-a="speak"], [data-a="speak-form"], [data-a="sel-speak"]');
+    if (!btn) return;
+
+    e.stopImmediatePropagation(); // Chặn hàm speak cũ của index.html
+    let wordToSpeak = '';
+    if (btn.dataset.a === 'speak') wordToSpeak = btn.dataset.v || '';
+    else if (btn.dataset.a === 'speak-form') {
+      const inp = document.getElementById('f-word');
+      wordToSpeak = inp ? inp.value : '';
+    } else if (btn.dataset.a === 'sel-speak') {
+      const barTxt = document.getElementById('selbar-txt');
+      wordToSpeak = barTxt ? barTxt.textContent : '';
+    }
+
+    if (wordToSpeak) {
+      playCambridge(wordToSpeak, 'us');
+    }
+  }, true); // Dùng capture phase để can thiệp trước
+
+  // Chạy kiểm tra icon loa sau khi trang vẽ xong
+  window.addEventListener('DOMContentLoaded', ensureSpeakerIcons);
+  setInterval(ensureSpeakerIcons, 1500);
+
+  // Đè lại hàm speak toàn cục
   global.speak = function (text, accent = 'us') {
-    speakWord(text, accent);
-  };
-  global.speakUK = function (text) {
-    speakWord(text, 'uk');
-  };
-  global.speakUS = function (text) {
-    speakWord(text, 'us');
+    playCambridge(text, accent);
   };
 
-  /* ===== HỆ THỐNG SMART CACHE ===== */
+  /* ===== SMART CACHE TOÀN CỤC ===== */
   function openDB() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve) => {
@@ -136,9 +140,7 @@
         const req = indexedDB.open(IDB_NAME, 1);
         req.onupgradeneeded = (e) => {
           const db = e.target.result;
-          if (!db.objectStoreNames.contains(IDB_STORE)) {
-            db.createObjectStore(IDB_STORE, { keyPath: 'key' });
-          }
+          if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, { keyPath: 'key' });
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
@@ -147,211 +149,58 @@
     return dbPromise;
   }
 
-  function loadLS() {
-    try {
-      const raw = localStorage.getItem(LS_CACHE_KEY);
-      if (!raw) return;
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === 'object') {
-        Object.entries(obj).forEach(([k, v]) => {
-          if (v && v.data !== undefined) memCache.set(k, v);
-        });
-      }
-    } catch (e) {}
-  }
-
-  async function syncIDB() {
-    const db = await openDB();
-    if (!db) return;
-    try {
-      const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAll();
-      req.onsuccess = () => {
-        (req.result || []).forEach((row) => {
-          if (row && row.key && row.data !== undefined) {
-            const ex = memCache.get(row.key);
-            if (!ex || (row.updatedAt || 0) > (ex.updatedAt || 0)) memCache.set(row.key, row);
-          }
-        });
-      };
-    } catch (e) {}
-  }
-
-  function saveLS() {
-    try {
-      const entries = Array.from(memCache.entries())
-        .sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0))
-        .slice(0, MAX_LS_ENTRIES);
-      const plain = {};
-      entries.forEach(([k, v]) => { plain[k] = v; });
-      localStorage.setItem(LS_CACHE_KEY, JSON.stringify(plain));
-    } catch (e) {}
-  }
-
-  async function setEntry(key, data, type = 'general') {
-    if (!key || data === undefined || data === null) return;
-    const record = { key, type, data, updatedAt: Date.now() };
-    memCache.set(key, record);
-    saveLS();
-    const db = await openDB();
-    if (db) {
-      try { db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(record); } catch (e) {}
-    }
-  }
-
-  async function getEntry(key) {
-    if (!key) return null;
-    if (memCache.has(key)) {
-      const hit = memCache.get(key);
-      hit.updatedAt = Date.now();
-      return hit.data;
-    }
+  async function getCache(k) {
+    if (memCache.has(k)) return memCache.get(k);
     const db = await openDB();
     if (!db) return null;
-    return new Promise((resolve) => {
+    return new Promise((res) => {
       try {
-        const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
-        req.onsuccess = () => {
-          if (req.result && req.result.data !== undefined) {
-            memCache.set(key, req.result);
-            resolve(req.result.data);
-          } else resolve(null);
-        };
-        req.onerror = () => resolve(null);
-      } catch (e) { resolve(null); }
+        const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(k);
+        req.onsuccess = () => res(req.result ? req.result.data : null);
+        req.onerror = () => res(null);
+      } catch (e) { res(null); }
     });
   }
 
-  function findInVault(term) {
-    try {
-      const target = normKey(term);
-      const raw = localStorage.getItem(LS_VAULT_KEY);
-      if (!target || !raw) return null;
-      const parsed = JSON.parse(raw);
-      const words = Array.isArray(parsed?.words) ? parsed.words : [];
-      const w = words.find((x) => normKey(x.word) === target);
-      if (!w) return null;
-      const m = w.medAnatomy || {};
-      const q = (Array.isArray(w.quizPool) && w.quizPool[0]) || {};
-      return {
-        word: w.word, pos: w.pos || 'word', ipa: w.ipa || '', cefr: w.cefr || 'B2', topic: w.topic || '',
-        medPrefix: m.prefix || '', medRoot: m.root || '', medCombining: m.combining || '', medSuffix: m.suffix || '',
-        meaning: w.meaning || '', example: w.example || '', exampleTrans: w.exampleTrans || '',
-        collocations: Array.isArray(w.collocations) ? w.collocations : [],
-        explanation: w.explanation || '', personalNote: w.personalNote || '',
-        quizSentence: q.sentence || '', quizTrans: q.trans || w.exampleTrans || ''
-      };
-    } catch (e) { return null; }
-  }
-
-  function withDedup(key, fn) {
-    if (inFlight.has(key)) return inFlight.get(key);
-    const p = Promise.resolve().then(fn).finally(() => inFlight.delete(key));
-    inFlight.set(key, p);
-    return p;
-  }
-
-  function extractKey(promptText) {
-    const p = String(promptText || '').trim();
-    if (!p || /Trả lời đúng 1 từ:\s*OK/i.test(p)) return null;
-    const lookMatch = p.match(/^Tra từ\/cụm từ\s+"([^"]+)"/i);
-    if (lookMatch) return { type: 'lookup', term: normKey(lookMatch[1]), key: 'lookup:' + normKey(lookMatch[1]) };
-    const analyzeMatch = p.match(/Người dùng nhập:\s*"""([\s\S]*?)"""/i);
-    if (analyzeMatch) {
-      const rawIn = analyzeMatch[1].trim();
-      const lvMatch = p.match(/Mức câu ví dụ:\s*([^\n.]+)/i);
-      return { type: 'analyze', key: 'analyze:' + (lvMatch ? normKey(lvMatch[1]) : 'auto') + ':' + hashText(rawIn) };
+  async function setCache(k, data) {
+    memCache.set(k, data);
+    const db = await openDB();
+    if (db) {
+      try { db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put({ key: k, data, ts: Date.now() }); } catch (e) {}
     }
-    return { type: 'raw', key: 'raw:' + hashText(p) };
   }
 
-  function makeGeminiResponse(text) {
-    return new Response(
-      JSON.stringify({ candidates: [{ content: { parts: [{ text: typeof text === 'string' ? text : JSON.stringify(text) }] } }] }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
+  // Đánh chặn fetch Google Gemini để lưu cache
+  if (typeof global.fetch === 'function') {
+    const origFetch = global.fetch.bind(global);
+    global.fetch = async function (url, opts) {
+      const u = typeof url === 'string' ? url : (url && url.url) || '';
 
-  const origFetch = global.fetch.bind(global);
-  global.fetch = async function (input, init) {
-    const url = typeof input === 'string' ? input : (input && input.url) || '';
-
-    if (url.includes('generativelanguage.googleapis.com/v1beta/models') && !url.includes(':generateContent')) {
-      try {
-        const cached = JSON.parse(localStorage.getItem(LS_MODELS_KEY) || 'null');
-        if (cached && Date.now() - (cached.ts || 0) < 86400000 && cached.data) {
-          return new Response(JSON.stringify(cached.data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-      } catch (e) {}
-      const resp = await origFetch(input, init);
-      if (resp.ok && !url.includes('pageToken=')) {
+      if (u.includes(':generateContent') && opts && opts.body) {
         try {
-          const data = await resp.clone().json();
-          localStorage.setItem(LS_MODELS_KEY, JSON.stringify({ ts: Date.now(), data }));
+          const b = JSON.parse(opts.body);
+          const p = b?.contents?.[0]?.parts?.[0]?.text || '';
+          if (p && !/Trả lời đúng 1 từ/i.test(p)) {
+            const ck = 'ai:' + normKey(p);
+            const cached = await getCache(ck);
+            if (cached) {
+              if (typeof global.toast === 'function') global.toast('⚡ Lấy từ bộ nhớ đệm (0 tốn lượt AI)');
+              return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: cached }] } }] }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+              });
+            }
+            const r = await origFetch(url, opts);
+            if (r.ok) {
+              const j = await r.clone().json();
+              const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              if (txt) await setCache(ck, txt);
+            }
+            return r;
+          }
         } catch (e) {}
       }
-      return resp;
-    }
-
-    if (url.includes('generativelanguage.googleapis.com/v1beta/models/') && url.includes(':generateContent') && init && init.body) {
-      try {
-        const body = JSON.parse(init.body);
-        const promptText = body?.contents?.[0]?.parts?.[0]?.text || '';
-        const info = extractKey(promptText);
-
-        if (info) {
-          if (info.type === 'lookup' && info.term) {
-            const vaultHit = findInVault(info.term);
-            if (vaultHit) {
-              notify('⚡ Đã có sẵn trong Kho từ (0 tốn lượt AI)');
-              return makeGeminiResponse(JSON.stringify(vaultHit));
-            }
-          }
-
-          const cachedData = await getEntry(info.key);
-          if (cachedData !== null && cachedData !== undefined) {
-            notify('⚡ Lấy từ bộ nhớ đệm (0 tốn lượt AI)');
-            return makeGeminiResponse(cachedData);
-          }
-
-          const netText = await withDedup(info.key, async () => {
-            const resp = await origFetch(input, init);
-            if (!resp.ok) {
-              const err = new Error('HTTP ' + resp.status);
-              err.status = resp.status;
-              err.body = await resp.text();
-              throw err;
-            }
-            const json = await resp.json();
-            const outText = (json?.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
-            if (outText) {
-              const clean = outText.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g, '');
-              await setEntry(info.key, clean, info.type);
-              try {
-                const obj = JSON.parse(clean);
-                if (Array.isArray(obj)) {
-                  for (const item of obj) {
-                    if (item && item.word) await setEntry('lookup:' + normKey(item.word), JSON.stringify(item), 'lookup');
-                  }
-                } else if (obj && obj.word) {
-                  await setEntry('lookup:' + normKey(obj.word), JSON.stringify(obj), 'lookup');
-                }
-              } catch (e) {}
-            }
-            return outText;
-          });
-
-          return makeGeminiResponse(netText);
-        }
-      } catch (err) {
-        if (err && err.status) {
-          return new Response(err.body || '{}', { status: err.status, headers: { 'Content-Type': 'application/json' } });
-        }
-      }
-    }
-
-    return origFetch(input, init);
-  };
-
-  loadLS();
-  syncIDB();
+      return origFetch(url, opts);
+    };
+  }
 })(window);
