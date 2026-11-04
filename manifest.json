@@ -1,15 +1,17 @@
 {
   "name": "LexiContext AI Pro",
   "short_name": "LexiContext",
+  "description": "Từ điển ngữ cảnh & luyện phát âm tiếng Anh chuẩn Cambridge",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#020617",
-  "theme_color": "#020617",
+  "theme_color": "#059669",
   "icons": [
     {
-      "src": "https://cdn-icons-png.flaticon.com/512/3898/3898082.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "./icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
   ]
 }
