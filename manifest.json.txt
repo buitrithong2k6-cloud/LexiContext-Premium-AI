@@ -1,0 +1,15 @@
+{
+  "name": "LexiContext AI Pro",
+  "short_name": "LexiContext",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3898/3898082.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
