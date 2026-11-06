@@ -2280,8 +2280,11 @@
                     <button type="button" id="wrt-eval-sent-btn" class="btn btn-pri font-bold !py-2 !px-4 whitespace-nowrap">
                       Đánh giá & Sửa lỗi câu ${curSentIdx + 1}
                     </button>
-                    <button type="button" id="wrt-speak-sent-btn" class="btn !py-2 !px-3 !text-xs whitespace-nowrap" title="Nghe phát âm câu bạn vừa viết">
-                      🔊 Nghe câu vừa viết
+                    <button type="button" id="wrt-speak-sent-btn" class="btn !py-2 !px-3 !text-xs font-bold border-sky-500/40 text-sky-400 hover:bg-sky-500/10 whitespace-nowrap" title="Nghe giọng chuẩn US lưu loát (Chunking 0s delay)">
+                      🔊 Nghe US
+                    </button>
+                    <button type="button" id="wrt-shadow-sent-btn" class="btn !py-2 !px-3 !text-xs font-bold border-amber-500/40 text-amber-400 hover:bg-amber-500/10 whitespace-nowrap" title="Tách cụm nhịp thở & dừng 1.5s sau mỗi cụm để nhại theo">
+                      🎯 Shadowing (Tách cụm)
                     </button>
                   </div>
 
@@ -2296,6 +2299,31 @@
                         : 'Hoàn thành bài viết ✓'
                     }
                   </button>
+                </div>
+
+                <!-- KHUNG SHADOWING TÁCH CỤM NHỊP THỞ (BREATH-GROUP CHUNKING & 1.5S PAUSING) -->
+                <div id="wrt-shadow-box" class="hidden inset p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5 text-xs">
+                  <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-2">
+                    <div class="flex items-center gap-2">
+                      <b class="text-amber-400">🎯 Luyện Shadowing theo cụm nhịp thở (Chuẩn US)</b>
+                      <span id="wrt-shadow-status" class="font-mono text-[11px] text-mute"></span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <button type="button" id="wrt-shadow-play-all" class="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold hover:bg-amber-500/30 whitespace-nowrap">
+                        ▶ Đọc lần lượt (Dừng 1.5s mỗi cụm)
+                      </button>
+                      <button type="button" id="wrt-shadow-play-fluent" class="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-300 font-semibold hover:bg-sky-500/25 whitespace-nowrap">
+                        🔊 Đọc liền mạch (0s)
+                      </button>
+                      <button type="button" id="wrt-shadow-stop" class="px-2 py-1 rounded-lg border border-line text-mute hover:text-fg whitespace-nowrap">
+                        ⏹ Dừng
+                      </button>
+                    </div>
+                  </div>
+                  <div class="text-[11px] text-mute">
+                    Bấm vào bất kỳ cụm nào bên dưới để nghe riêng cụm đó (US), hoặc bấm <b>▶ Đọc lần lượt</b> để máy đọc từng cụm và dừng <b>1.5 giây</b> cho bạn nhại theo:
+                  </div>
+                  <div id="wrt-shadow-chunks" class="flex flex-wrap items-center gap-2 pt-0.5"></div>
                 </div>
               </div>
 
@@ -2451,18 +2479,178 @@
       });
     }
 
-    // Nghe phát âm câu vừa viết
+    // Nghe phát âm chuẩn US (Chunking 0ms delay) & Luyện Shadowing tách cụm (Dừng 1.5s mỗi cụm)
     const speakSentBtn = container.querySelector('#wrt-speak-sent-btn');
+    const shadowSentBtn = container.querySelector('#wrt-shadow-sent-btn');
+    const shadowBox = container.querySelector('#wrt-shadow-box');
+    const shadowChunksEl = container.querySelector('#wrt-shadow-chunks');
+    const shadowStatusEl = container.querySelector('#wrt-shadow-status');
+    const shadowPlayAllBtn = container.querySelector('#wrt-shadow-play-all');
+    const shadowPlayFluentBtn = container.querySelector('#wrt-shadow-play-fluent');
+    const shadowStopBtn = container.querySelector('#wrt-shadow-stop');
+
+    const getAudioTargetText = () => {
+      const txt = sentInput ? sentInput.value.trim() : '';
+      if (!txt) {
+        global.LexiAcademy.notify('Hãy viết câu tiếng Anh trước khi bấm nghe hoặc luyện Shadowing.');
+        if (sentInput) sentInput.focus();
+        return '';
+      }
+      return txt;
+    };
+
+    const resetChunkHighlight = () => {
+      if (!shadowChunksEl) return;
+      shadowChunksEl.querySelectorAll('[data-shadow-chunk-idx]').forEach((btn) => {
+        btn.className =
+          'px-2.5 py-1.5 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 hover:bg-amber-500/10 transition font-mono text-xs text-left';
+      });
+    };
+
+    const renderShadowChunks = (txt) => {
+      if (!shadowChunksEl || !txt) return [];
+      const chunks =
+        typeof global.splitIntoBreathChunks === 'function'
+          ? global.splitIntoBreathChunks(txt)
+          : [txt];
+
+      shadowChunksEl.innerHTML = chunks
+        .map(
+          (c, i) => `
+          <button type="button" data-shadow-chunk-idx="${i}" class="px-2.5 py-1.5 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 hover:bg-amber-500/10 transition font-mono text-xs text-left" title="Bấm để nghe riêng cụm ${
+            i + 1
+          } (Giọng chuẩn US)">
+            <span class="text-amber-400 font-bold mr-1">${i + 1}.</span>${esc(c)}
+          </button>
+          ${i < chunks.length - 1 ? '<span class="text-mute font-mono text-xs select-none">➔</span>' : ''}
+        `
+        )
+        .join('');
+
+      shadowChunksEl.querySelectorAll('[data-shadow-chunk-idx]').forEach((btn) => {
+        btn.onclick = () => {
+          const idx = Number(btn.getAttribute('data-shadow-chunk-idx'));
+          const chunkText = chunks[idx];
+          if (!chunkText) return;
+          resetChunkHighlight();
+          btn.className =
+            'px-2.5 py-1.5 rounded-lg border border-sky-400 bg-sky-500/20 text-sky-200 ring-2 ring-sky-400/60 transition font-mono text-xs text-left font-bold';
+          if (shadowStatusEl) {
+            shadowStatusEl.textContent = `🔊 Đang đọc cụm ${idx + 1}/${chunks.length} (US)...`;
+          }
+          if (typeof global.playSingleChunkUS === 'function') {
+            global.playSingleChunkUS(chunkText, {
+              onComplete: () => {
+                resetChunkHighlight();
+                if (shadowStatusEl) {
+                  shadowStatusEl.textContent = `✓ Đã đọc cụm ${idx + 1}/${chunks.length} — Bấm cụm bất kỳ để nghe lại`;
+                }
+              }
+            });
+          } else if (typeof global.speakUS === 'function') {
+            global.speakUS(chunkText);
+          }
+        };
+      });
+
+      return chunks;
+    };
+
+    const createPlaybackCallbacks = (isShadowMode) => ({
+      onChunkStart: (idx, total) => {
+        resetChunkHighlight();
+        if (shadowChunksEl) {
+          const activeBtn = shadowChunksEl.querySelector(`[data-shadow-chunk-idx="${idx}"]`);
+          if (activeBtn) {
+            activeBtn.className =
+              'px-2.5 py-1.5 rounded-lg border border-sky-400 bg-sky-500/25 text-sky-200 ring-2 ring-sky-400/70 transition font-mono text-xs text-left font-bold';
+          }
+        }
+        if (shadowStatusEl) {
+          shadowStatusEl.textContent = `🔊 Đang đọc cụm ${idx + 1}/${total} (US)...`;
+        }
+      },
+      onPauseStart: (idx, total) => {
+        resetChunkHighlight();
+        if (shadowChunksEl) {
+          const activeBtn = shadowChunksEl.querySelector(`[data-shadow-chunk-idx="${idx}"]`);
+          if (activeBtn) {
+            activeBtn.className =
+              'px-2.5 py-1.5 rounded-lg border border-emerald-400 bg-emerald-500/25 text-emerald-200 ring-2 ring-emerald-400/70 transition font-mono text-xs text-left font-bold';
+          }
+        }
+        if (shadowStatusEl) {
+          shadowStatusEl.textContent = `🎙️ Dừng 1.5s — Hãy đọc nhại lại cụm ${idx + 1}/${total}...`;
+        }
+      },
+      onComplete: () => {
+        resetChunkHighlight();
+        if (shadowStatusEl) {
+          shadowStatusEl.textContent = isShadowMode
+            ? '✓ Hoàn tất lượt Shadowing (dừng 1.5s mỗi cụm)'
+            : '✓ Đã đọc xong câu (Chuẩn US liền mạch)';
+        }
+      }
+    });
+
     if (speakSentBtn && sentInput) {
       speakSentBtn.onclick = () => {
-        const txt = sentInput.value.trim();
-        if (!txt) {
-          global.LexiAcademy.notify('Hãy viết câu tiếng Anh trước khi bấm nghe.');
-          sentInput.focus();
-          return;
+        const txt = getAudioTargetText();
+        if (!txt) return;
+        if (shadowBox && !shadowBox.classList.contains('hidden')) {
+          renderShadowChunks(txt);
         }
-        if (typeof global.speakUS === 'function') global.speakUS(txt);
-        else if (typeof global.speak === 'function') global.speak(txt);
+        if (typeof global.speakUS === 'function') {
+          global.speakUS(txt, createPlaybackCallbacks(false));
+        } else if (typeof global.speak === 'function') {
+          global.speak(txt);
+        }
+      };
+    }
+
+    if (shadowSentBtn && sentInput && shadowBox) {
+      shadowSentBtn.onclick = () => {
+        const txt = getAudioTargetText();
+        if (!txt) return;
+        shadowBox.classList.remove('hidden');
+        renderShadowChunks(txt);
+        if (typeof global.speakShadow === 'function') {
+          global.speakShadow(txt, createPlaybackCallbacks(true));
+        }
+      };
+    }
+
+    if (shadowPlayAllBtn) {
+      shadowPlayAllBtn.onclick = () => {
+        const txt = getAudioTargetText();
+        if (!txt) return;
+        renderShadowChunks(txt);
+        if (typeof global.speakShadow === 'function') {
+          global.speakShadow(txt, createPlaybackCallbacks(true));
+        }
+      };
+    }
+
+    if (shadowPlayFluentBtn) {
+      shadowPlayFluentBtn.onclick = () => {
+        const txt = getAudioTargetText();
+        if (!txt) return;
+        renderShadowChunks(txt);
+        if (typeof global.speakUS === 'function') {
+          global.speakUS(txt, createPlaybackCallbacks(false));
+        }
+      };
+    }
+
+    if (shadowStopBtn) {
+      shadowStopBtn.onclick = () => {
+        if (typeof global.stopAudioPlayback === 'function') {
+          global.stopAudioPlayback();
+        }
+        resetChunkHighlight();
+        if (shadowStatusEl) {
+          shadowStatusEl.textContent = '⏹ Đã dừng phát âm.';
+        }
       };
     }
 
