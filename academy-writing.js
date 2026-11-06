@@ -2258,10 +2258,15 @@
                 </div>
               </div>
 
-              <!-- Ô nhập câu tiếng Anh -->
-              <div class="space-y-2">
+              <!-- Ô nhập câu tiếng Anh (Hiển thị gọn câu tiếng Việt đang viết để tiện đối chiếu khi dùng điện thoại chia trên - dưới) -->
+              <div class="space-y-2.5">
+                <div class="inset p-3 rounded-xl border border-warn/30 bg-warn/5 text-xs sm:text-sm leading-relaxed">
+                  <span class="font-mono font-bold text-warn mr-1.5">Câu ${curSentIdx + 1}:</span>
+                  <span class="font-medium text-fg">${esc(curSent.vn)}</span>
+                </div>
+
                 <label for="wrt-sent-input" class="block text-xs font-bold text-mute">
-                  Viết câu tiếng Anh tương ứng với Câu ${curSentIdx + 1} bên trái:
+                  Viết câu tiếng Anh tương ứng:
                 </label>
                 <textarea
                   id="wrt-sent-input"
