@@ -83,14 +83,104 @@
   }
 
   /* ==========================================================================
-   * 1. HỆ THỐNG ÂM THANH CAMBRIDGE DUAL-AUDIO (US/UK) & SHADOWING CADENCE
+   * 1. HỆ THỐNG ÂM THANH CHUẨN US (FLUENT CHUNKING & SHADOWING 1.5S PAUSE)
    * ========================================================================== */
+
+  let activePlaybackToken = 0;
+  let activeShadowTimer = null;
+
+  function stopAudioPlayback() {
+    activePlaybackToken++;
+    if (activeShadowTimer) {
+      clearTimeout(activeShadowTimer);
+      activeShadowTimer = null;
+    }
+    try {
+      if (sharedAudio) {
+        sharedAudio.onended = null;
+        sharedAudio.onerror = null;
+        sharedAudio.pause();
+      }
+      if ('speechSynthesis' in global) speechSynthesis.cancel();
+    } catch (e) {}
+  }
 
   function isSentenceText(text) {
     const str = String(text || '').trim();
     if (!str) return false;
     const words = str.split(/\s+/).filter(Boolean);
     return words.length >= 2 || /[.!?—;:"]/.test(str);
+  }
+
+  // Tách câu dài thành các cụm nhịp thở tự nhiên (Breath-Group Chunking: 3–7 từ/cụm)
+  function splitIntoBreathChunks(rawText) {
+    const clean = String(rawText || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([,.;!?])/g, '$1')
+      .replace(/([,.;!?])([^\s,.;!?])/g, '$1 $2')
+      .trim();
+    if (!clean) return [];
+
+    const totalWords = clean.split(/\s+/).filter(Boolean);
+    if (totalWords.length <= 5) return [clean];
+
+    // Bước 1: Tách theo dấu kết câu (. ? ! ;)
+    const sentences = clean.match(/[^.?!;]+[.?!;]*\s*/g) || [clean];
+    const commaSegments = [];
+
+    sentences.forEach((sent) => {
+      const s = sent.trim();
+      if (!s) return;
+      const parts = s.split(/(?<=,)\s+/);
+      for (let i = 0; i < parts.length; i++) {
+        const cur = parts[i].trim();
+        if (!cur) continue;
+        const wc = cur.replace(/[^a-zA-Z0-9\s']/g, '').trim().split(/\s+/).filter(Boolean).length;
+        // Nếu cụm giữa câu chỉ có 1 từ (như đồng vị ngữ ", An,") thì gộp vào cụm đứng trước để không bị nuốt âm
+        if (wc <= 1 && commaSegments.length > 0 && i > 0) {
+          commaSegments[commaSegments.length - 1] = (commaSegments[commaSegments.length - 1] + ' ' + cur).trim();
+        } else {
+          commaSegments.push(cur);
+        }
+      }
+    });
+
+    // Bước 2: Với các mệnh đề dài hơn 6 từ, tách tiếp tại ranh giới nhịp thở tự nhiên
+    const finalChunks = [];
+    const breathSplitRe =
+      /(?<!\b(?:going|used|want|wants|wanted|need|needs|needed|have|has|had|ought|able|glad|happy|great|nice|pleased|ready|trying|try|plan|plans|hope|hopes|decide|decided))\s+(?=(?:to\s+[a-z]{2,}|who\s+|which\s+|that\s+|because\s+|although\s+|while\s+|when\s+|if\s+|and\s+I\s+|and\s+have\s+|and\s+start\s+|and\s+go\s+|and\s+studies\s+|and\s+plays\s+|and\s+suggest\s+|but\s+also\s+|but\s+|or\s+give\s+|or\s+watch\s+|or\s+listening\s+|about\s+my\s+|with\s+vegetables\s+|instead\s+of\s+|rather\s+than\s+|such\s+as\s+|as\s+well\s+as\s+|as\s+soon\s+as\s+|so\s+that\s+|in\s+order\s+to\s+))/i;
+
+    commaSegments.forEach((seg) => {
+      const words = seg.split(/\s+/).filter(Boolean);
+      if (words.length <= 7) {
+        finalChunks.push(seg);
+        return;
+      }
+
+      const subParts = seg.split(breathSplitRe).map((x) => x.trim()).filter(Boolean);
+      const mergedSub = [];
+      subParts.forEach((sp) => {
+        const spWords = sp.split(/\s+/).filter(Boolean).length;
+        if (mergedSub.length > 0 && spWords <= 2) {
+          mergedSub[mergedSub.length - 1] += ' ' + sp;
+        } else {
+          mergedSub.push(sp);
+        }
+      });
+
+      mergedSub.forEach((ms) => {
+        const msWords = ms.split(/\s+/).filter(Boolean);
+        if (msWords.length <= 8) {
+          finalChunks.push(ms);
+        } else {
+          const mid = Math.ceil(msWords.length / 2);
+          finalChunks.push(msWords.slice(0, mid).join(' '));
+          finalChunks.push(msWords.slice(mid).join(' '));
+        }
+      });
+    });
+
+    return finalChunks.filter(Boolean);
   }
 
   function prefetchDictionaryMp3(word) {
@@ -101,117 +191,264 @@
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!Array.isArray(data) || !data[0] || !Array.isArray(data[0].phonetics)) return;
-        let uk = '',
-          us = '';
+        let us = '';
         for (const p of data[0].phonetics) {
           const a = p && p.audio ? p.audio : '';
           if (!a) continue;
-          if (/-(uk|gb)\.mp3$/i.test(a) && !uk) uk = a;
-          else if (/-(us)\.mp3$/i.test(a) && !us) us = a;
+          if (/-(us)\.mp3$/i.test(a) && !us) us = a;
           else if (!us) us = a;
         }
-        if (uk || us) cambridgeMp3Cache.set(w, { uk, us });
+        if (us) cambridgeMp3Cache.set(w, { us });
       })
       .catch(() => {});
   }
 
-  function speakExpressiveUtterance(text, options = {}) {
-    if (!('speechSynthesis' in global) || typeof SpeechSynthesisUtterance === 'undefined') return;
-    try {
-      speechSynthesis.cancel();
-      const isUK = options.accent === 'uk';
-      const isShadowing = !!options.shadowing;
-
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = isUK ? 'en-GB' : 'en-US';
-      u.rate = isShadowing ? 0.86 : options.rate || 0.94;
-      u.pitch = isUK ? 1.04 : 1.0;
-
-      const voices = speechSynthesis.getVoices() || [];
-      if (voices.length) {
-        const langRx = isUK ? /^en[-_](GB|UK)/i : /^en[-_]US/i;
-        const preferred =
-          voices.find(
-            (v) =>
-              langRx.test(v.lang) &&
-              /Daniel|Arthur|Martha|Oliver|Samantha|Alex|Ava|Allison|Natural|Enhanced|Premium/i.test(v.name)
-          ) ||
-          voices.find((v) => langRx.test(v.lang) && !/Google/i.test(v.name)) ||
-          voices.find((v) => langRx.test(v.lang));
-        if (preferred) u.voice = preferred;
-      }
-
-      speechSynthesis.resume();
-      speechSynthesis.speak(u);
-    } catch (e) {}
+  // Chuẩn hóa văn bản cụm trước khi gửi lên bộ đọc US để tránh nuốt tên riêng "An" như mạo từ "an"
+  function normalizeChunkForUSAudio(chunkText) {
+    return String(chunkText || '')
+      .replace(/,\s*An\s*,/g, ', Ahn,')
+      .replace(/\bAn\b(?=\s*,|\s+who\b|\s+will\b)/g, 'Ahn')
+      .trim();
   }
 
-  function playCambridgeAudio(rawText, accent = 'us', isShadowing = false) {
-    const text = String(rawText || '').trim();
-    if (!text) return;
-    const isUK = String(accent).toLowerCase() === 'uk';
-    const isSentence = isSentenceText(text);
+  function buildUSAudioUrl(chunkText) {
+    const spoken = normalizeChunkForUSAudio(chunkText);
+    return (
+      'https://dict.youdao.com/dictvoice?audio=' +
+      encodeURIComponent(spoken.slice(0, 180)) +
+      '&type=2'
+    );
+  }
 
-    try {
-      if ('speechSynthesis' in global) speechSynthesis.cancel();
-    } catch (e) {}
-
-    // Câu dài hoặc từ ghép (2 từ trở lên): Phát tức thì bằng Neural SpeechSynthesis (<20ms)
-    if (isSentence || isShadowing) {
-      speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us', shadowing: isShadowing });
+  // Dự phòng chỉ khi hoàn toàn mất kết nối mạng
+  function speakFallbackUS(text, rate = 0.92, onEnd) {
+    if (!('speechSynthesis' in global) || typeof SpeechSynthesisUtterance === 'undefined') {
+      if (typeof onEnd === 'function') onEnd();
       return;
     }
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-US';
+      u.rate = rate;
+      const voices = speechSynthesis.getVoices() || [];
+      const preferred =
+        voices.find(
+          (v) =>
+            /^en[-_]US/i.test(v.lang) &&
+            /Samantha|Alex|Ava|Allison|Natural|Enhanced|Premium/i.test(v.name)
+        ) ||
+        voices.find((v) => /^en[-_]US/i.test(v.lang)) ||
+        voices.find((v) => /^en/i.test(v.lang));
+      if (preferred) u.voice = preferred;
+      if (typeof onEnd === 'function') {
+        u.onend = () => onEnd();
+        u.onerror = () => onEnd();
+      }
+      speechSynthesis.resume();
+      speechSynthesis.speak(u);
+    } catch (e) {
+      if (typeof onEnd === 'function') onEnd();
+    }
+  }
 
-    // Từ đơn (1 từ): Phát chuẩn audio từ điển Cambridge MP3
-    const cleanWord = normKey(text);
-    const cachedMp3 = cambridgeMp3Cache.get(cleanWord);
-    const dictStreamUrl =
-      'https://dict.youdao.com/dictvoice?audio=' +
-      encodeURIComponent(text.slice(0, 80)) +
-      '&type=' +
-      (isUK ? '1' : '2');
+  // Phát 1 cụm đơn lẻ bằng chuẩn US (dùng khi bấm vào từng thẻ cụm trong khung Shadowing)
+  function playSingleChunkUS(chunkText, callbacks = {}) {
+    const text = String(chunkText || '').trim();
+    if (!text) return;
+    stopAudioPlayback();
+    const myToken = activePlaybackToken;
+    const url = buildUSAudioUrl(text);
 
-    const primaryUrl =
-      cachedMp3 && (isUK ? cachedMp3.uk : cachedMp3.us)
-        ? isUK
-          ? cachedMp3.uk
-          : cachedMp3.us
-        : dictStreamUrl;
-
-    if (!cleanWord.includes(' ')) prefetchDictionaryMp3(cleanWord);
+    if (typeof callbacks.onStart === 'function') callbacks.onStart();
 
     if (!sharedAudio) {
-      speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us' });
+      speakFallbackUS(text, 0.92, () => {
+        if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
+          callbacks.onFinish();
+        }
+      });
       return;
     }
 
     try {
-      sharedAudio.pause();
-      sharedAudio.src = primaryUrl;
-      sharedAudio.onerror = function () {
-        if (sharedAudio.src !== dictStreamUrl) {
-          sharedAudio.src = dictStreamUrl;
-          sharedAudio.onerror = function () {
-            speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us' });
-          };
-          sharedAudio.play().catch(() => speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us' }));
-        } else {
-          speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us' });
-        }
+      sharedAudio.src = url;
+      sharedAudio.onended = function () {
+        if (myToken !== activePlaybackToken) return;
+        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
       };
-
-      const playPromise = sharedAudio.play();
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(() => {
-          speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us' });
+      sharedAudio.onerror = function () {
+        if (myToken !== activePlaybackToken) return;
+        speakFallbackUS(text, 0.92, () => {
+          if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
+            callbacks.onFinish();
+          }
+        });
+      };
+      const p = sharedAudio.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {
+          if (myToken !== activePlaybackToken) return;
+          speakFallbackUS(text, 0.92, () => {
+            if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
+              callbacks.onFinish();
+            }
+          });
         });
       }
     } catch (e) {
-      speakExpressiveUtterance(text, { accent: isUK ? 'uk' : 'us' });
+      speakFallbackUS(text, 0.92, () => {
+        if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
+          callbacks.onFinish();
+        }
+      });
+    }
+  }
+
+  // Phát từ đơn hoặc câu dài bằng kỹ thuật Chunking & Pausing (Chuẩn US duy nhất)
+  // - Khi isShadowing = false (🔊 Nghe US): Nạp trước toàn bộ cụm, phát nối tiếp 0ms delay như câu giao tiếp lưu loát
+  // - Khi isShadowing = true (🎯 Shadowing): Sau mỗi cụm dừng đúng 1500ms (1.5s) để người học nhại theo
+  function playCambridgeAudio(rawText, _accent = 'us', isShadowing = false, callbacks = {}) {
+    const text = String(rawText || '').trim();
+    if (!text) return;
+
+    stopAudioPlayback();
+    const myToken = activePlaybackToken;
+    const isSentence = isSentenceText(text);
+
+    // 1. Từ đơn (1 từ): Phát chuẩn audio từ điển Cambridge US MP3 / Youdao US
+    if (!isSentence) {
+      const cleanWord = normKey(text);
+      const cachedMp3 = cambridgeMp3Cache.get(cleanWord);
+      const dictStreamUrl = buildUSAudioUrl(text);
+      const primaryUrl = cachedMp3 && cachedMp3.us ? cachedMp3.us : dictStreamUrl;
+
+      if (!cleanWord.includes(' ')) prefetchDictionaryMp3(cleanWord);
+
+      if (!sharedAudio) {
+        speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
+        return;
+      }
+
+      try {
+        sharedAudio.src = primaryUrl;
+        sharedAudio.onerror = function () {
+          if (myToken !== activePlaybackToken) return;
+          if (sharedAudio.src !== dictStreamUrl) {
+            sharedAudio.src = dictStreamUrl;
+            sharedAudio.onerror = function () {
+              speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
+            };
+            sharedAudio.play().catch(() => speakFallbackUS(text, isShadowing ? 0.85 : 0.94));
+          } else {
+            speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
+          }
+        };
+        const playPromise = sharedAudio.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => speakFallbackUS(text, isShadowing ? 0.85 : 0.94));
+        }
+      } catch (e) {
+        speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
+      }
+      return;
+    }
+
+    // 2. Cụm từ & Câu dài: Áp dụng kỹ thuật Breath-Group Chunking & Preloaded Queue (Chuẩn US)
+    const chunks = splitIntoBreathChunks(text);
+    const urls = chunks.map((c) => buildUSAudioUrl(c));
+
+    // Nạp trước song song (Parallel Preload) tất cả các cụm vào bộ nhớ đệm trình duyệt để chuyển cụm 0ms delay
+    const preloaders = urls.map((u) => {
+      try {
+        const a = new Audio();
+        a.preload = 'auto';
+        a.src = u;
+        a.load();
+        return a;
+      } catch (e) {
+        return null;
+      }
+    });
+
+    const pauseMs = isShadowing ? 1500 : 0; // Shadowing dừng 1.5s sau mỗi cụm; Nghe US lưu loát dừng 0ms
+
+    function playChunkAt(idx) {
+      if (myToken !== activePlaybackToken) return;
+      if (idx >= chunks.length) {
+        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+        return;
+      }
+
+      const curChunk = chunks[idx];
+      const curUrl = urls[idx];
+
+      if (typeof callbacks.onChunkStart === 'function') {
+        callbacks.onChunkStart(idx, curChunk, chunks.length);
+      }
+
+      const advanceNext = () => {
+        if (myToken !== activePlaybackToken) return;
+        if (idx < chunks.length - 1) {
+          if (pauseMs > 0) {
+            if (typeof callbacks.onChunkPause === 'function') {
+              callbacks.onChunkPause(idx, curChunk, chunks.length, pauseMs);
+            }
+            activeShadowTimer = setTimeout(() => {
+              playChunkAt(idx + 1);
+            }, pauseMs);
+          } else {
+            // 0ms delay: nối tiếp ngay lập tức sang cụm tiếp theo đã nạp sẵn
+            playChunkAt(idx + 1);
+          }
+        } else {
+          if (pauseMs > 0 && typeof callbacks.onChunkPause === 'function') {
+            callbacks.onChunkPause(idx, curChunk, chunks.length, pauseMs);
+            activeShadowTimer = setTimeout(() => {
+              if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
+                callbacks.onFinish();
+              }
+            }, pauseMs);
+          } else if (typeof callbacks.onFinish === 'function') {
+            callbacks.onFinish();
+          }
+        }
+      };
+
+      if (!sharedAudio) {
+        speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
+        return;
+      }
+
+      try {
+        sharedAudio.onended = advanceNext;
+        sharedAudio.onerror = function () {
+          if (myToken !== activePlaybackToken) return;
+          speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
+        };
+        sharedAudio.src = curUrl;
+        const p = sharedAudio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            if (myToken !== activePlaybackToken) return;
+            speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
+          });
+        }
+      } catch (e) {
+        speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
+      }
+    }
+
+    // Giữ tham chiếu preloaders trong suốt phiên đọc để trình duyệt không thu hồi sớm
+    if (preloaders.length) {
+      playChunkAt(0);
     }
   }
 
   function upgradeSpeakerButtons() {
+    // Dọn các nút UK cũ nếu có để giao diện chỉ giữ chuẩn US duy nhất
+    document.querySelectorAll('button[data-accent="uk"]').forEach((el) => el.remove());
+
     const btns = document.querySelectorAll(
       'button[data-a="speak"]:not([data-cambridge-upgraded]), button[data-a="speak-form"]:not([data-cambridge-upgraded]), button[data-a="sel-speak"]:not([data-cambridge-upgraded])'
     );
@@ -225,37 +462,22 @@
       btn.dataset.accent = 'us';
       btn.className =
         'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border border-sky/40 bg-sky/10 text-sky hover:brightness-110 cursor-pointer transition-colors';
-      btn.title = isSentence ? 'Nghe cả câu giọng Mỹ (US)' : 'Nghe phát âm Anh - Mỹ (US)';
+      btn.title = isSentence ? 'Nghe cả câu lưu loát chuẩn Mỹ (US)' : 'Nghe phát âm chuẩn Mỹ (US)';
       btn.innerHTML = SPEAKER_SVG + '<span>US</span>';
 
-      const ukBtn = document.createElement('button');
-      ukBtn.type = 'button';
-      ukBtn.dataset.a = action;
-      if (val) ukBtn.dataset.v = val;
-      ukBtn.dataset.accent = 'uk';
-      ukBtn.setAttribute('data-cambridge-upgraded', '1');
-      ukBtn.className =
-        'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border border-bad/40 bg-bad/10 text-bad hover:brightness-110 cursor-pointer transition-colors';
-      ukBtn.title = isSentence ? 'Nghe cả câu giọng Anh (UK)' : 'Nghe phát âm Anh - Anh (UK)';
-      ukBtn.innerHTML = SPEAKER_SVG + '<span>UK</span>';
-
-      if (btn.parentNode) {
-        btn.parentNode.insertBefore(ukBtn, btn.nextSibling);
-
-        if (isSentence && !btn.parentNode.querySelector('[data-shadowing-btn]')) {
-          const shadowBtn = document.createElement('button');
-          shadowBtn.type = 'button';
-          shadowBtn.dataset.a = action;
-          if (val) shadowBtn.dataset.v = val;
-          shadowBtn.dataset.shadowingBtn = '1';
-          shadowBtn.dataset.accent = 'shadow';
-          shadowBtn.setAttribute('data-cambridge-upgraded', '1');
-          shadowBtn.className =
-            'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border border-warn/40 bg-warn/10 text-warn hover:brightness-110 cursor-pointer transition-colors';
-          shadowBtn.title = 'Luyện Shadowing: Đọc chậm rõ trọng âm để nhại theo';
-          shadowBtn.innerHTML = SHADOW_SVG + '<span>Shadow</span>';
-          btn.parentNode.insertBefore(shadowBtn, ukBtn.nextSibling);
-        }
+      if (btn.parentNode && isSentence && !btn.parentNode.querySelector('[data-shadowing-btn]')) {
+        const shadowBtn = document.createElement('button');
+        shadowBtn.type = 'button';
+        shadowBtn.dataset.a = action;
+        if (val) shadowBtn.dataset.v = val;
+        shadowBtn.dataset.shadowingBtn = '1';
+        shadowBtn.dataset.accent = 'shadow';
+        shadowBtn.setAttribute('data-cambridge-upgraded', '1');
+        shadowBtn.className =
+          'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border border-warn/40 bg-warn/10 text-warn hover:brightness-110 cursor-pointer transition-colors';
+        shadowBtn.title = 'Luyện Shadowing: Đọc tách từng cụm và dừng 1.5s sau mỗi cụm để nhại theo';
+        shadowBtn.innerHTML = SHADOW_SVG + '<span>Shadow</span>';
+        btn.parentNode.insertBefore(shadowBtn, btn.nextSibling);
       }
 
       if (val && !val.includes(' ')) {
@@ -273,8 +495,7 @@
       e.preventDefault();
       e.stopImmediatePropagation();
 
-      const accent = btn.dataset.accent || 'us';
-      const isShadow = accent === 'shadow' || btn.hasAttribute('data-shadowing-btn');
+      const isShadow = btn.dataset.accent === 'shadow' || btn.hasAttribute('data-shadowing-btn');
       let textToSpeak = '';
       if (btn.dataset.a === 'speak') {
         textToSpeak = btn.dataset.v || '';
@@ -287,7 +508,7 @@
       }
 
       if (textToSpeak) {
-        playCambridgeAudio(textToSpeak, isShadow ? 'us' : accent, isShadow);
+        playCambridgeAudio(textToSpeak, 'us', isShadow);
       } else {
         notify('Hãy nhập từ vựng trước khi nghe.');
       }
@@ -1812,18 +2033,21 @@
     initObserver();
   }
 
-  global.speak = function (text, accent = "us") {
-    playCambridgeAudio(text, accent);
+  global.speak = function (text, _accent = "us", callbacks = {}) {
+    playCambridgeAudio(text, "us", false, callbacks);
   };
-  global.speakUS = function (text) {
-    playCambridgeAudio(text, "us");
+  global.speakUS = function (text, callbacks = {}) {
+    playCambridgeAudio(text, "us", false, callbacks);
   };
-  global.speakUK = function (text) {
-    playCambridgeAudio(text, "uk");
+  global.speakUK = function (text, callbacks = {}) {
+    playCambridgeAudio(text, "us", false, callbacks);
   };
-  global.speakShadow = function (text) {
-    playCambridgeAudio(text, "us", true);
+  global.speakShadow = function (text, callbacks = {}) {
+    playCambridgeAudio(text, "us", true, callbacks);
   };
+  global.splitIntoBreathChunks = splitIntoBreathChunks;
+  global.playSingleChunkUS = playSingleChunkUS;
+  global.stopAudioPlayback = stopAudioPlayback;
   global.openSyncModal = renderSyncModal;
   global.buildMedicalBreakdownHTML = buildMedicalBreakdownHTML;
 
