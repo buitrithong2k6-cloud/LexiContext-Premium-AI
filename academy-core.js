@@ -152,25 +152,52 @@
       const targetWords = String(targetSentence || '').trim().split(/\s+/).filter(Boolean);
       const typedWords = String(userTyped || '').trim().split(/\s+/).filter(Boolean);
 
-      let correctCount = 0;
-      const html = targetWords.map((tw, idx) => {
-        const tNorm = clean(tw);
-        const uNorm = clean(typedWords[idx] || '');
-        const uPrev = clean(typedWords[idx - 1] || '');
-        const uNext = clean(typedWords[idx + 1] || '');
-        const isMatch = tNorm && (uNorm === tNorm || uPrev === tNorm || uNext === tNorm);
-        if (isMatch) {
-          correctCount++;
-          return `<span class="px-1.5 py-0.5 rounded bg-ok/20 text-ok font-bold">${esc(tw)}</span>`;
-        }
-        if (idx < typedWords.length) {
-          return `<span class="px-1.5 py-0.5 rounded bg-bad/20 text-bad font-bold underline decoration-dotted">${esc(typedWords[idx])} → <b>${esc(tw)}</b></span>`;
-        }
-        return `<span class="px-1.5 py-0.5 rounded bg-line/40 text-mute font-mono">___ (${esc(tw[0] || '')}...)</span>`;
-      }).join(' ');
+      const n = targetWords.length;
+      const m = typedWords.length;
+      if (!n) return { pct: 0, correctCount: 0, total: 0, html: '' };
 
-      const pct = targetWords.length ? Math.round((correctCount / targetWords.length) * 100) : 0;
-      return { pct, correctCount, total: targetWords.length, html };
+      // Quy hoạch động LCS để căn chỉnh từ chính xác kể cả khi học viên viết thiếu/thừa từ ở giữa câu
+      const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+      for (let i = 1; i <= n; i++) {
+        const tNorm = clean(targetWords[i - 1]);
+        for (let j = 1; j <= m; j++) {
+          if (tNorm && tNorm === clean(typedWords[j - 1])) {
+            dp[i][j] = dp[i - 1][j - 1] + 1;
+          } else {
+            dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+          }
+        }
+      }
+
+      // Truy vết các vị trí từ khớp trong targetWords
+      const matchedTargetIdx = new Set();
+      let i = n;
+      let j = m;
+      while (i > 0 && j > 0) {
+        if (clean(targetWords[i - 1]) && clean(targetWords[i - 1]) === clean(typedWords[j - 1])) {
+          matchedTargetIdx.add(i - 1);
+          i--;
+          j--;
+        } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+          i--;
+        } else {
+          j--;
+        }
+      }
+
+      const correctCount = matchedTargetIdx.size;
+      const html = targetWords
+        .map((tw, idx) => {
+          if (matchedTargetIdx.has(idx)) {
+            return `<span class="px-1.5 py-0.5 rounded bg-ok/15 text-ok font-semibold">${esc(tw)}</span>`;
+          }
+          const hintChar = esc(tw.slice(0, Math.min(2, tw.length)));
+          return `<span class="px-1.5 py-0.5 rounded bg-warn/15 text-warn font-mono" title="Từ cần điền: ${esc(tw)}">${hintChar}___</span>`;
+        })
+        .join(' ');
+
+      const pct = Math.round((correctCount / n) * 100);
+      return { pct, correctCount, total: n, html };
     },
 
     openView(subTabKey) {
@@ -202,8 +229,8 @@
     updateHeaderProgress() {
       const b1Span = document.getElementById('acad-b1-pct');
       const b2Span = document.getElementById('acad-b2-pct');
-      if (b1Span) b1Span.textContent = `Đạt ${this.calcProgress('B1')}%`;
-      if (b2Span) b2Span.textContent = `Đạt ${this.calcProgress('B2')}%`;
+      if (b1Span) b1Span.textContent = `${this.calcProgress('B1')}%`;
+      if (b2Span) b2Span.textContent = `${this.calcProgress('B2')}%`;
     },
 
     render() {
@@ -215,47 +242,37 @@
       const b2Pct = this.calcProgress('B2');
 
       const headerHTML = `
-        <div class="card p-4 sm:p-5 space-y-4 border-pri/40">
+        <div class="card p-4 space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div class="flex items-center gap-2">
-                <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-pri/20 text-pri border border-pri/40">LỘ TRÌNH THỰC CHIẾN 4 KỸ NĂNG</span>
-                <span class="text-xs font-mono text-warn font-bold">🔥 Duy trì: ${state.dailyStreak} ngày</span>
+              <div class="flex items-center gap-2 text-xs text-mute">
+                <span>Ôn luyện VSTEP B1 – B2</span>
+                <span aria-hidden="true">·</span>
+                <span class="font-mono tabular-nums text-warn">Duy trì: ${state.dailyStreak} ngày</span>
               </div>
-              <h2 class="text-lg sm:text-xl font-bold mt-1">Chinh phục B1 → Nâng tầm B2 → Duy trì Phản xạ & Từ vựng</h2>
-              <p class="text-xs text-mute">Hệ thống kỹ năng chia theo từng file module độc lập, tối ưu và dễ chỉnh sửa.</p>
+              <h2 class="text-base sm:text-lg font-bold mt-0.5">Hệ thống Luyện tập 4 Kỹ năng</h2>
             </div>
 
-            <!-- BỘ CHỌN CỘT MỐC: B1 vs B2 -->
-            <div class="flex flex-wrap items-center gap-2 inset p-1.5 rounded-xl">
-              <button type="button" data-acad-lv="B1" class="btn ${lv === 'B1' && state.subTab !== 'daily' ? 'btn-ok font-bold ring-2 ring-ok/50' : ''} !py-2 !px-3">
-                <div>
-                  <div class="text-xs font-bold">🎯 Cột mốc 1: B1 (Trung cấp)</div>
-                  <div id="acad-b1-pct" class="text-[10px] opacity-80">VSTEP B1 / IELTS 4.5-5.0 • Đạt ${b1Pct}%</div>
-                </div>
+            <!-- BỘ CHỌN TRÌNH ĐỘ: B1 vs B2 -->
+            <div class="flex flex-wrap items-center gap-1.5 inset p-1 rounded-xl">
+              <button type="button" data-acad-lv="B1" class="btn ${lv === 'B1' && state.subTab !== 'daily' ? 'btn-ok font-bold' : ''} !py-1.5 !px-3 !text-xs whitespace-nowrap">
+                <span>Trình độ B1</span>
+                <span id="acad-b1-pct" class="font-mono tabular-nums opacity-80 ml-1">${b1Pct}%</span>
               </button>
-              <button type="button" data-acad-lv="B2" class="btn ${lv === 'B2' && state.subTab !== 'daily' ? 'btn-pri font-bold ring-2 ring-pri/50' : ''} !py-2 !px-3">
-                <div>
-                  <div class="text-xs font-bold">🚀 Cột mốc 2: B2 (Trung cao)</div>
-                  <div id="acad-b2-pct" class="text-[10px] opacity-80">VSTEP B2 / IELTS 5.5-6.5 • Đạt ${b2Pct}%</div>
-                </div>
-              </button>
-              <button type="button" data-acad-sub="daily" class="btn ${state.subTab === 'daily' ? 'btn-warn font-bold ring-2 ring-warn/50' : ''} !py-2 !px-3">
-                <div>
-                  <div class="text-xs font-bold">🔥 Chế độ Duy trì (5 phút/ngày)</div>
-                  <div class="text-[10px] opacity-80">Giữ phản xạ giao tiếp & từ vựng</div>
-                </div>
+              <button type="button" data-acad-lv="B2" class="btn ${lv === 'B2' && state.subTab !== 'daily' ? 'btn-pri font-bold' : ''} !py-1.5 !px-3 !text-xs whitespace-nowrap">
+                <span>Trình độ B2</span>
+                <span id="acad-b2-pct" class="font-mono tabular-nums opacity-80 ml-1">${b2Pct}%</span>
               </button>
             </div>
           </div>
 
-          <!-- THANH CHUYỂN 5 KỸ NĂNG -->
-          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-3 border-t border-line/60">
-            <button type="button" data-acad-sub="listening" class="btn justify-center !py-2.5 ${state.subTab === 'listening' ? 'btn-pri font-bold' : ''}">🎧 1. Luyện Nghe (${lv})</button>
-            <button type="button" data-acad-sub="writing" class="btn justify-center !py-2.5 ${state.subTab === 'writing' ? 'btn-pri font-bold' : ''}">✍️ 2. Luyện Viết (${lv})</button>
-            <button type="button" data-acad-sub="speaking" class="btn justify-center !py-2.5 ${state.subTab === 'speaking' ? 'btn-pri font-bold' : ''}">🗣️ 3. Giao tiếp (${lv})</button>
-            <button type="button" data-acad-sub="grammar" class="btn justify-center !py-2.5 ${state.subTab === 'grammar' ? 'btn-pri font-bold' : ''}">📐 4. Ngữ pháp (${lv})</button>
-            <button type="button" data-acad-sub="daily" class="btn justify-center !py-2.5 col-span-2 sm:col-span-1 ${state.subTab === 'daily' ? 'btn-warn font-bold' : ''}">🔥 5. Duy trì 5 Phút</button>
+          <!-- THANH CHUYỂN KỸ NĂNG -->
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2.5 border-t border-line/60">
+            <button type="button" data-acad-sub="listening" class="btn justify-center !py-2 !text-xs whitespace-nowrap ${state.subTab === 'listening' ? 'btn-pri font-bold' : ''}">1. Luyện Nghe (${lv})</button>
+            <button type="button" data-acad-sub="writing" class="btn justify-center !py-2 !text-xs whitespace-nowrap ${state.subTab === 'writing' ? 'btn-pri font-bold' : ''}">2. Luyện Viết (${lv})</button>
+            <button type="button" data-acad-sub="speaking" class="btn justify-center !py-2 !text-xs whitespace-nowrap ${state.subTab === 'speaking' ? 'btn-pri font-bold' : ''}">3. Giao tiếp (${lv})</button>
+            <button type="button" data-acad-sub="grammar" class="btn justify-center !py-2 !text-xs whitespace-nowrap ${state.subTab === 'grammar' ? 'btn-pri font-bold' : ''}">4. Ngữ pháp (${lv})</button>
+            <button type="button" data-acad-sub="daily" class="btn justify-center !py-2 !text-xs whitespace-nowrap col-span-2 sm:col-span-1 ${state.subTab === 'daily' ? 'btn-warn font-bold' : ''}">5. Ôn tập 5 Phút</button>
           </div>
         </div>
 
