@@ -1727,7 +1727,87 @@
       });
     }
 
-    // 6. Thiếu dấu chấm kết thúc câu (.)
+    // 6. Động từ khuyết thiếu (can/will/should/would/must/may/could) + "to V"
+    const modalToMatch = text.match(/\b(can|cannot|will|would|should|must|may|might|could)\s+to\s+([a-z]+)\b/i);
+    if (modalToMatch) {
+      issues.push({
+        type: 'major',
+        desc: `Sai cấu trúc động từ khuyết thiếu: Sau "${modalToMatch[1]}" dùng động từ nguyên mẫu không "to" → sửa "${modalToMatch[0]}" thành "${modalToMatch[1]} ${modalToMatch[2]}".`,
+        applyFix: (s) =>
+          s.replace(/\b(can|cannot|will|would|should|must|may|might|could)\s+to\s+([a-z]+)\b/gi, '$1 $2')
+      });
+    }
+
+    // 7. Danh từ không đếm được bị thêm "-s" (informations, advices, equipments, knowledges, pollutions, homeworks)
+    const uncountableMatch = text.match(
+      /\b(informations|advices|equipments|knowledges|homeworks|furnitures|pollutions|traffics)\b/i
+    );
+    if (uncountableMatch) {
+      const wrongNoun = uncountableMatch[1];
+      const fixedNoun = wrongNoun.replace(/s$/i, '');
+      issues.push({
+        type: 'major',
+        desc: `Lỗi danh từ không đếm được: "${wrongNoun}" là danh từ không đếm được nên không thêm "-s" → sửa thành "${fixedNoun}".`,
+        applyFix: (s) =>
+          s.replace(
+            /\b(information|advice|equipment|knowledge|homework|furniture|pollution|traffic)s\b/gi,
+            '$1'
+          )
+      });
+    }
+
+    // 8. Thừa giới từ in/on/at trước this/next/last/every + thời gian
+    const prepTimeMatch = text.match(
+      /\b(in|on|at)\s+(this|next|last|every)\s+(summer|winter|spring|autumn|fall|week|month|year|morning|afternoon|evening)\b/i
+    );
+    if (prepTimeMatch) {
+      const fullPrep = prepTimeMatch[0];
+      const fixedTime = `${prepTimeMatch[2]} ${prepTimeMatch[3]}`;
+      issues.push({
+        type: 'major',
+        desc: `Thừa giới từ "${prepTimeMatch[1]}": Trước "${fixedTime}" không dùng giới từ → sửa "${fullPrep}" thành "${fixedTime}".`,
+        applyFix: (s) =>
+          s.replace(
+            /\b(?:in|on|at)\s+((?:this|next|last|every)\s+(?:summer|winter|spring|autumn|fall|week|month|year|morning|afternoon|evening))\b/gi,
+            '$1'
+          )
+      });
+    }
+
+    // 9. Sau giới từ (instead of / good at / keen on / fond of / capable of / interested in / thank you for) dùng V nguyên mẫu thay vì V-ing
+    const prepVerbMatch = text.match(
+      /\b(instead\s+of|good\s+at|keen\s+on|fond\s+of|capable\s+of|interested\s+in|thank\s+you\s+for)\s+(read|cook|take|study|play|meet|surf|use|seek|help|work|speak|listen|watch|make|go|eat|jog|run)\b/i
+    );
+    if (prepVerbMatch) {
+      const prepPart = prepVerbMatch[1];
+      const baseV = prepVerbMatch[2].toLowerCase();
+      const ingMap = {
+        take: 'taking',
+        make: 'making',
+        use: 'using',
+        run: 'running',
+        jog: 'jogging'
+      };
+      const vIng = ingMap[baseV] || baseV + 'ing';
+      issues.push({
+        type: 'major',
+        desc: `Sai dạng động từ sau giới từ: Sau "${prepPart}" động từ phải ở dạng V-ing → sửa "${prepPart} ${prepVerbMatch[2]}" thành "${prepPart} ${vIng}".`,
+        applyFix: (s) =>
+          s.replace(new RegExp(`\\b(${prepPart})\\s+${prepVerbMatch[2]}\\b`, 'i'), `$1 ${vIng}`)
+      });
+    }
+
+    // 10. Lỗi hòa hợp chủ ngữ - động từ phổ biến ("there is many/several", "people is/has")
+    if (/\bthere\s+is\s+(many|several|two|three|some|plenty\s+of|numerous)\b/i.test(text)) {
+      issues.push({
+        type: 'major',
+        desc: 'Sai sự hòa hợp chủ ngữ - động từ: Đi với danh từ số nhiều phải dùng "There are...", không dùng "There is...".',
+        applyFix: (s) =>
+          s.replace(/\b(there)\s+is\s+(many|several|two|three|some|plenty\s+of|numerous)\b/gi, '$1 are $2')
+      });
+    }
+
+    // 11. Thiếu dấu chấm kết thúc câu (.)
     if (!/[.!?]$/.test(text)) {
       const lastWord = (text.match(/(\S+)$/) || [''])[1];
       issues.push({
@@ -1819,7 +1899,7 @@
       }
     });
 
-    // 3. Kiểm tra lỗi viết hoa, dấu câu, khoảng trắng trên chính câu của học viên
+    // 3. Kiểm tra lỗi viết hoa, dấu câu, khoảng trắng và ngữ pháp chung trên chính câu của học viên
     const mechIssues = detectGeneralMechanicsAndGrammar(clean);
     mechIssues.forEach((mi) => {
       if (mi.type === 'major') majorErrorCount++;
@@ -1907,7 +1987,7 @@
         ? `<div class="p-2.5 rounded-lg bg-pri/10 border border-pri/30 space-y-1.5 text-xs">
              <div class="flex flex-wrap items-center justify-between gap-2">
                <b class="text-pri">Gợi ý chỉnh lại trên chính câu của bạn:</b>
-               <button type="button" id="wrt-apply-repair-btn" class="px-2 py-0.5 rounded bg-pri text-slate-950 font-bold text-[11px] hover:opacity-90">
+               <button type="button" id="wrt-apply-repair-btn" class="px-2.5 py-1 rounded bg-pri text-slate-950 font-bold text-[11px] hover:opacity-90 whitespace-nowrap">
                  Áp dụng câu đã sửa
                </button>
              </div>
@@ -1918,13 +1998,12 @@
     return `
       <div class="space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-2">
-          <div class="flex items-center gap-2">
-            <span class="px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold ${
-              res.pct >= 85 ? 'bg-ok/20 text-ok' : 'bg-warn/20 text-warn'
-            }">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="font-mono tabular-nums font-bold ${res.pct >= 85 ? 'text-ok' : 'text-warn'}">
               Độ phù hợp: ${res.pct}%
             </span>
-            <span class="text-xs font-bold ${res.passed ? 'text-ok' : 'text-warn'}">
+            <span aria-hidden="true" class="text-mute">·</span>
+            <span class="font-semibold ${res.passed ? 'text-ok' : 'text-warn'}">
               ${
                 res.pct === 100
                   ? '✓ Hoàn hảo (100%) — Có thể qua câu tiếp theo'
@@ -1936,7 +2015,7 @@
           </div>
           ${
             !res.passed
-              ? `<button type="button" id="wrt-open-hint-from-fb" class="text-xs text-pri underline">Mở xem gợi ý cấu trúc</button>`
+              ? `<button type="button" id="wrt-open-hint-from-fb" class="text-xs text-pri underline whitespace-nowrap">Mở xem gợi ý cấu trúc</button>`
               : ''
           }
         </div>
@@ -2021,14 +2100,15 @@
         <div class="card p-4 space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <span class="text-xs font-mono text-pri">${esc(item.type)}</span>
-              <h3 class="text-base font-bold">${esc(item.title)}</h3>
+              <div class="flex items-center gap-2 text-xs text-mute">
+                <span class="font-mono text-pri">${esc(item.type)}</span>
+                <span aria-hidden="true">·</span>
+                <span class="font-mono tabular-nums">Hoàn thành ${passedCount}/${item.sentences.length} câu</span>
+              </div>
+              <h3 class="text-base font-bold mt-0.5">${esc(item.title)}</h3>
             </div>
             <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-pri/15 text-pri font-bold">
-                Hoàn thành: ${passedCount}/${item.sentences.length} câu
-              </span>
-              <button type="button" id="wrt-reset-topic" class="btn !text-xs text-mute">Làm lại</button>
+              <button type="button" id="wrt-reset-topic" class="btn !py-1.5 !px-3 !text-xs text-mute whitespace-nowrap">Làm lại đề này</button>
             </div>
           </div>
 
@@ -2045,7 +2125,7 @@
                   isCurrent ? 'border-pri bg-pri/15 font-bold' : 'border-line/60 hover:bg-line/20'
                 } text-xs flex items-center justify-between gap-2">
                   <span class="truncate">${esc(it.title)}</span>
-                  <span class="font-mono text-[10px] shrink-0 ${
+                  <span class="font-mono tabular-nums text-[10px] shrink-0 ${
                     doneCnt === it.sentences.length ? 'text-ok font-bold' : 'text-mute'
                   }">${doneCnt}/${it.sentences.length}</span>
                 </button>
@@ -2067,7 +2147,7 @@
           <div class="lg:col-span-5 card p-4 space-y-3 lg:sticky lg:top-20">
             <div class="flex items-center justify-between border-b border-line/60 pb-2">
               <b class="text-sm">Dàn bài Tiếng Việt</b>
-              <span class="text-xs font-mono text-warn font-bold">Câu ${curSentIdx + 1}/${item.sentences.length}</span>
+              <span class="text-xs font-mono tabular-nums text-warn font-bold">Câu ${curSentIdx + 1}/${item.sentences.length}</span>
             </div>
 
             <div class="space-y-2 max-h-[520px] overflow-y-auto pr-1">
@@ -2094,16 +2174,16 @@
                       }">
                         ${
                           isActive
-                            ? '👉 Câu ' + (idx + 1) + ' (Đang viết)'
+                            ? 'Câu ' + (idx + 1) + ' · Đang viết'
                             : isPassed
-                            ? '✓ Câu ' + (idx + 1) + ' (Đã đạt)'
+                            ? '✓ Câu ' + (idx + 1) + ' · Đã đạt'
                             : 'Câu ' + (idx + 1)
                         }
                       </span>
                       ${
                         sData.pct
-                          ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                              sData.pct >= 85 ? 'bg-ok/20 text-ok' : 'bg-warn/20 text-warn'
+                          ? `<span class="text-[11px] font-mono tabular-nums ${
+                              sData.pct >= 85 ? 'text-ok' : 'text-warn'
                             } font-bold">${sData.pct}%</span>`
                           : ''
                       }
@@ -2133,21 +2213,22 @@
               <!-- Thanh điều hướng câu + Nút Ẩn/Hiện Gợi ý -->
               <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-2.5">
                 <div class="flex items-center gap-2">
-                  <span class="px-2.5 py-1 rounded-lg bg-warn text-slate-950 font-bold text-xs font-mono">
+                  <span class="text-xs font-mono tabular-nums font-bold text-warn">
                     Câu ${curSentIdx + 1} / ${item.sentences.length}
                   </span>
-                  <button type="button" id="wrt-toggle-hint" class="btn !py-1 !px-2.5 !text-xs ${
+                  <span aria-hidden="true" class="text-mute">·</span>
+                  <button type="button" id="wrt-toggle-hint" class="btn !py-1 !px-2.5 !text-xs whitespace-nowrap ${
                     curSaved.showHint ? 'border-pri text-pri bg-pri/10' : ''
                   }">
-                    ${curSaved.showHint ? '🙈 Ẩn gợi ý & cấu trúc' : '💡 Xem gợi ý & cấu trúc'}
+                    ${curSaved.showHint ? 'Ẩn gợi ý & cấu trúc' : 'Xem gợi ý & cấu trúc'}
                   </button>
                 </div>
 
                 <div class="flex items-center gap-1.5">
-                  <button type="button" id="wrt-prev-sent" class="btn !py-1 !px-2.5 !text-xs" ${
+                  <button type="button" id="wrt-prev-sent" class="btn !py-1 !px-2.5 !text-xs whitespace-nowrap" ${
                     curSentIdx === 0 ? 'disabled' : ''
                   }>← Trước</button>
-                  <button type="button" id="wrt-next-sent" class="btn !py-1 !px-2.5 !text-xs" ${
+                  <button type="button" id="wrt-next-sent" class="btn !py-1 !px-2.5 !text-xs whitespace-nowrap" ${
                     curSentIdx === item.sentences.length - 1 ? 'disabled' : ''
                   }>Tiếp →</button>
                 </div>
@@ -2168,7 +2249,7 @@
                       (kw) => `
                     <button type="button" data-wrt-kw="${esc(
                       kw
-                    )}" class="px-2 py-0.5 rounded border border-pri/40 bg-pri/10 text-pri font-mono text-xs hover:bg-pri/20">
+                    )}" class="px-2 py-0.5 rounded border border-pri/40 bg-pri/10 text-pri font-mono text-xs hover:bg-pri/20 whitespace-nowrap">
                       + ${esc(kw)}
                     </button>
                   `
@@ -2190,14 +2271,19 @@
                 >${esc(curSaved.text || '')}</textarea>
 
                 <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-                  <button type="button" id="wrt-eval-sent-btn" class="btn btn-pri font-bold !py-2 !px-4">
-                    Đánh giá & Sửa lỗi câu ${curSentIdx + 1}
-                  </button>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button type="button" id="wrt-eval-sent-btn" class="btn btn-pri font-bold !py-2 !px-4 whitespace-nowrap">
+                      Đánh giá & Sửa lỗi câu ${curSentIdx + 1}
+                    </button>
+                    <button type="button" id="wrt-speak-sent-btn" class="btn !py-2 !px-3 !text-xs whitespace-nowrap" title="Nghe phát âm câu bạn vừa viết">
+                      🔊 Nghe câu vừa viết
+                    </button>
+                  </div>
 
                   <button
                     type="button"
                     id="wrt-pass-next-btn"
-                    class="btn ${curSaved.passed ? 'btn-ok font-bold' : ''} !py-2 !px-3.5"
+                    class="btn ${curSaved.passed ? 'btn-ok font-bold' : ''} !py-2 !px-3.5 whitespace-nowrap"
                   >
                     ${
                       curSentIdx < item.sentences.length - 1
@@ -2218,11 +2304,12 @@
 
             <!-- BẢN GHÉP CÁC CÂU ĐÃ VIẾT -->
             <div class="card p-4 space-y-2.5">
-              <div class="flex items-center justify-between border-b border-line/60 pb-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-2">
                 <b class="text-xs sm:text-sm">Bài viết của bạn (ghép từ các câu đã viết)</b>
                 <div class="flex items-center gap-2">
-                  <span class="font-mono text-xs text-pri font-bold">${totalWords} từ</span>
-                  <button type="button" id="wrt-copy-full" class="btn !py-1 !px-2 !text-xs">Sao chép</button>
+                  <span class="font-mono tabular-nums text-xs text-pri font-bold">${totalWords} từ</span>
+                  <button type="button" id="wrt-speak-full" class="btn !py-1 !px-2.5 !text-xs whitespace-nowrap">🔊 Nghe cả bài</button>
+                  <button type="button" id="wrt-copy-full" class="btn !py-1 !px-2.5 !text-xs whitespace-nowrap">Sao chép</button>
                 </div>
               </div>
               <div class="inset p-3 rounded-xl text-xs sm:text-sm leading-relaxed font-mono min-h-[60px]">
@@ -2334,7 +2421,7 @@
         const nextShow = hintBox.classList.contains('hidden');
         tState.sentences[curSentIdx].showHint = nextShow;
         hintBox.classList.toggle('hidden', !nextShow);
-        toggleHintBtn.textContent = nextShow ? '🙈 Ẩn gợi ý & cấu trúc' : '💡 Xem gợi ý & cấu trúc';
+        toggleHintBtn.textContent = nextShow ? 'Ẩn gợi ý & cấu trúc' : 'Xem gợi ý & cấu trúc';
         toggleHintBtn.classList.toggle('border-pri', nextShow);
         toggleHintBtn.classList.toggle('text-pri', nextShow);
         toggleHintBtn.classList.toggle('bg-pri/10', nextShow);
@@ -2357,6 +2444,21 @@
         tState.sentences[curSentIdx].text = sentInput.value;
         global.LexiAcademy.saveState();
       });
+    }
+
+    // Nghe phát âm câu vừa viết
+    const speakSentBtn = container.querySelector('#wrt-speak-sent-btn');
+    if (speakSentBtn && sentInput) {
+      speakSentBtn.onclick = () => {
+        const txt = sentInput.value.trim();
+        if (!txt) {
+          global.LexiAcademy.notify('Hãy viết câu tiếng Anh trước khi bấm nghe.');
+          sentInput.focus();
+          return;
+        }
+        if (typeof global.speakUS === 'function') global.speakUS(txt);
+        else if (typeof global.speak === 'function') global.speak(txt);
+      };
     }
 
     // Bấm chèn từ gợi ý
@@ -2464,6 +2566,25 @@ Hãy nhận xét trực tiếp vào từng từ/cụm từ học viên đã vi�
             // Không hiển thị thông báo treo nếu không có mạng hoặc chưa cấu hình khóa AI
           }
         }
+      };
+    }
+
+    // Nghe toàn bộ bài viết đã ghép
+    const speakFullBtn = container.querySelector('#wrt-speak-full');
+    if (speakFullBtn) {
+      speakFullBtn.onclick = () => {
+        const fullTxt = item.sentences
+          .map((_, idx) =>
+            tState.sentences[idx] && tState.sentences[idx].text ? tState.sentences[idx].text.trim() : ''
+          )
+          .filter(Boolean)
+          .join(' ');
+        if (!fullTxt) {
+          global.LexiAcademy.notify('Chưa có câu nào để đọc.');
+          return;
+        }
+        if (typeof global.speakUS === 'function') global.speakUS(fullTxt);
+        else if (typeof global.speak === 'function') global.speak(fullTxt);
       };
     }
 
