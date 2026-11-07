@@ -519,7 +519,11 @@
 
       const url = candidates[cIdx++];
       try {
+        const userRate = Number(global.lexiPlaybackSpeed) || 1.0;
+        const clampedRate = Math.max(0.5, Math.min(1.5, userRate));
         sharedAudio.muted = false;
+        sharedAudio.defaultPlaybackRate = clampedRate;
+        sharedAudio.playbackRate = clampedRate;
         sharedAudio.onended = function () {
           if (myToken !== activePlaybackToken) return;
           if (typeof onDone === 'function') onDone();
@@ -529,6 +533,7 @@
           tryPlayCurrent();
         };
         sharedAudio.src = url;
+        sharedAudio.playbackRate = clampedRate;
         const p = sharedAudio.play();
         if (p && typeof p.catch === 'function') {
           p.catch(() => {
@@ -2434,6 +2439,21 @@
     initObserver();
   }
 
+  global.lexiPlaybackSpeed = 1.0;
+  global.setAudioPlaybackRate = function (rate) {
+    const r = Math.max(0.5, Math.min(1.5, Number(rate) || 1.0));
+    global.lexiPlaybackSpeed = r;
+    if (sharedAudio) {
+      try {
+        sharedAudio.defaultPlaybackRate = r;
+        sharedAudio.playbackRate = r;
+      } catch (e) {}
+    }
+    return r;
+  };
+  global.getAudioPlaybackRate = function () {
+    return Number(global.lexiPlaybackSpeed) || 1.0;
+  };
   global.speak = function (text, _accent = "us", callbacks = {}) {
     playCambridgeAudio(text, "us", false, callbacks);
   };
