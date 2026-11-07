@@ -1,9 +1,10 @@
 /**
  * LexiContext Academy — Studio Luyện Nghe & Luyện Nói 3-Trong-1 (academy-listening.js)
  * Tích hợp:
- * - Bố cục Studio 2 Cột hiện đại (Trình phát Video YouTube / Audio ELLLO + Danh sách câu bên trái | Khung thực hành câu bên phải)
- * - 3 Chế độ liên thông: 🗣️ Shadowing (Luyện nói) · ⌨️ Dictation (Chép chính tả) · 🎧 Nghe hiểu VSTEP
- * - Phiên âm IPA ngay dưới từng từ + Chạm từ bất kỳ để tra nghĩa & lưu vào Kho từ vựng 1-chạm
+ * - Bố cục Studio 2 Cột hiện đại (Trình phát Video YouTube Giọng Người Thật / Audio US + Danh sách câu bên trái | Khung thực hành câu bên phải)
+ * - 3 Chế độ liên thông: 🗣️ Shadowing (Luyện nói) · ⌨️ Dictation (Chép chính tả) · 🎧 Nghe hiểu VSTEP (3-4 câu hỏi Tiếng Anh chuẩn đề thi)
+ * - Đồng bộ Karaoke Thời Gian Thực (Real-time Word Highlighting) theo tiến độ Video YouTube & Audio US
+ * - Phiên âm IPA chuẩn Oxford/Cambridge 100% dưới từng từ + Chạm từ bất kỳ để tra nghĩa & lưu vào Kho từ vựng 1-chạm
  * - Ghi âm giọng nói thật (MediaRecorder + SpeechRecognition), nghe lại băng ghi âm của chính mình,
  *   chấm từng từ bằng Thẻ Màu (Xanh ✓ / Vàng ▲ / Đỏ ✗) và Huấn luyện viên AI nhận xét phát âm 4 mục chi tiết
  * - Điều chỉnh tốc độ phát (0.5x · 0.75x · 1.0x · 1.25x · 1.5x), Ghép câu kế tiếp (1/2) & Nút Tách cụm 2 chế độ
@@ -11,103 +12,36 @@
 (function (global) {
   'use strict';
 
-  const LS_STUDIO_CUSTOM_KEY = 'lexicontext_studio_custom_lessons_v1';
-
-  // Từ điển IPA & Nghĩa Tiếng Việt tích hợp sẵn cho các từ vựng thông dụng, VSTEP B1-B2 & Y khoa
-  const BUILTIN_WORD_DICT = {
+  // Gộp từ điển IPA từ file dữ liệu độc lập (/listening-lessons-data.js) và từ điển nội bộ
+  const EXTRA_WORD_DICT = {
     easy: { ipa: 'ˈiː.zi', pos: 'adj', vi: 'dễ dàng, thoải mái', ex: 'The first part of the exam was easy.' },
     english: { ipa: 'ˈɪŋ.ɡlɪʃ', pos: 'noun', vi: 'tiếng Anh, người Anh', ex: 'She speaks fluent English.' },
     conversations: { ipa: 'ˌkɑːn.vɚˈseɪ.ʃənz', pos: 'noun', vi: 'các cuộc hội thoại, trò chuyện', ex: 'Easy English conversations help you practice daily.' },
     conversation: { ipa: 'ˌkɑːn.vɚˈseɪ.ʃən', pos: 'noun', vi: 'cuộc hội thoại', ex: 'We had a long conversation.' },
-    how: { ipa: 'haʊ', pos: 'adv', vi: 'như thế nào, bao nhiêu', ex: 'How often do you exercise?' },
     often: { ipa: 'ˈɔː.fən', pos: 'adv', vi: 'thường xuyên', ex: 'How often do you go swimming?' },
-    do: { ipa: 'duː', pos: 'verb', vi: 'làm (trợ động từ)', ex: 'What do you do every day?' },
-    you: { ipa: 'juː', pos: 'pron', vi: 'bạn, các bạn', ex: 'How are you feeling today?' },
-    go: { ipa: 'ɡoʊ', pos: 'verb', vi: 'đi', ex: 'I go to the hospital every morning.' },
     swimming: { ipa: 'ˈswɪm.ɪŋ', pos: 'noun', vi: 'bơi lội', ex: 'Swimming is great for cardiovascular health.' },
-    hello: { ipa: 'həˈloʊ', pos: 'interj', vi: 'xin chào', ex: 'Hello, nice to meet you.' },
-    buli: { ipa: 'ˈbuː.li', pos: 'noun', vi: 'Buli (tên người dẫn BBC)', ex: 'Hello, Buli!' },
-    hi: { ipa: 'haɪ', pos: 'interj', vi: 'chào (thân mật)', ex: 'Hi Sian! How are you?' },
-    sian: { ipa: 'ʃɑːn', pos: 'noun', vi: 'Sian (tên người dẫn BBC, đọc là /ʃɑːn/)', ex: 'Hi Sian! What is your daily routine?' },
-    what: { ipa: 'wʌt', pos: 'pron', vi: 'cái gì, điều gì', ex: 'What is your daily routine?' },
-    is: { ipa: 'ɪz', pos: 'verb', vi: 'thì, là', ex: 'What is the main symptom?' },
-    your: { ipa: 'jʊr', pos: 'det', vi: 'của bạn', ex: 'Please describe your daily routine.' },
-    daily: { ipa: 'ˈdeɪ.li', pos: 'adj', vi: 'hàng ngày', ex: 'Exercise should be part of your daily routine.' },
-    routine: { ipa: 'ruːˈtiːn', pos: 'noun', vi: 'lịch trình, thói quen hàng ngày', ex: 'My daily routine starts at 6 a.m.' },
-    well: { ipa: 'wel', pos: 'interj/adv', vi: 'à, ừm / tốt, khỏe', ex: 'Well, I always get up at seven o’clock.' },
-    i: { ipa: 'aɪ', pos: 'pron', vi: 'tôi, mình', ex: 'I work at a medical center.' },
-    always: { ipa: 'ˈɔːl.weɪz', pos: 'adv', vi: 'luôn luôn', ex: 'I always wash my hands before meals.' },
-    get: { ipa: 'ɡet', pos: 'verb', vi: 'thức (get up), nhận được', ex: 'I get up early on weekdays.' },
-    up: { ipa: 'ʌp', pos: 'adv', vi: 'lên, dậy (get up)', ex: 'What time do you get up?' },
-    at: { ipa: 'æt', pos: 'prep', vi: 'vào lúc, tại', ex: 'The clinic opens at seven o’clock.' },
-    seven: { ipa: 'ˈsev.ən', pos: 'num', vi: 'số bảy (7)', ex: 'I get up at seven o’clock.' },
-    "o'clock": { ipa: 'əˈklɑːk', pos: 'adv', vi: 'giờ đúng', ex: 'It is seven o’clock in the morning.' },
-    usually: { ipa: 'ˈjuː.ʒu.ə.li', pos: 'adv', vi: 'thường lệ, thường thường', ex: 'I usually have fruit and yogurt for breakfast.' },
-    have: { ipa: 'hæv', pos: 'verb', vi: 'có, ăn/uống', ex: 'I have breakfast at home.' },
-    fruit: { ipa: 'fruːt', pos: 'noun', vi: 'trái cây, hoa quả', ex: 'Fresh fruit provides essential vitamins.' },
-    and: { ipa: 'ænd', pos: 'conj', vi: 'và', ex: 'Rest and hydration are important.' },
+    buli: { ipa: 'ˈbuː.li', pos: 'noun', vi: 'Buli (tên riêng)', ex: 'Hello, Buli!' },
+    sian: { ipa: 'ʃɑːn', pos: 'noun', vi: 'Sian (tên riêng, đọc là /ʃɑːn/)', ex: 'Hi Sian! What is your daily routine?' },
     yogurt: { ipa: 'ˈjoʊ.ɡɚt', pos: 'noun', vi: 'sữa chua', ex: 'Yogurt is good for digestion.' },
-    for: { ipa: 'fɔːr', pos: 'prep', vi: 'cho, trong khoảng', ex: 'Take this medicine for seven days.' },
-    breakfast: { ipa: 'ˈbrek.fəst', pos: 'noun', vi: 'bữa ăn sáng', ex: 'Never skip breakfast before clinical rounds.' },
-    then: { ipa: 'ðen', pos: 'adv', vi: 'sau đó', ex: 'First we run a blood test, then an ultrasound.' },
-    to: { ipa: 'tuː', pos: 'prep', vi: 'đến, để', ex: 'I go to work by bus.' },
-    work: { ipa: 'wɜːrk', pos: 'noun/verb', vi: 'công việc, làm việc', ex: 'She goes to work at eight.' },
-    by: { ipa: 'baɪ', pos: 'prep', vi: 'bằng (phương tiện), bởi', ex: 'I commute to the hospital by bus.' },
-    bus: { ipa: 'bʌs', pos: 'noun', vi: 'xe buýt', ex: 'Taking the bus reduces traffic.' },
-    check: { ipa: 'tʃek', pos: 'verb', vi: 'kiểm tra, khám', ex: 'Let me check your blood pressure.' },
-    my: { ipa: 'maɪ', pos: 'det', vi: 'của tôi', ex: 'I check my emails in the morning.' },
     emails: { ipa: 'ˈiː.meɪlz', pos: 'noun', vi: 'thư điện tử (email)', ex: 'I reply to urgent emails every morning.' },
-    in: { ipa: 'ɪn', pos: 'prep', vi: 'trong, vào buổi', ex: 'I study English in the evening.' },
-    the: { ipa: 'ðə', pos: 'det', vi: 'cái, việc (mạo từ xác định)', ex: 'The patient is recovering well.' },
-    morning: { ipa: 'ˈmɔːr.nɪŋ', pos: 'noun', vi: 'buổi sáng', ex: 'I have classes in the morning.' },
-    during: { ipa: 'ˈdʊr.ɪŋ', pos: 'prep', vi: 'trong suốt (khoảng thời gian)', ex: 'Drink plenty of water during the day.' },
-    week: { ipa: 'wiːk', pos: 'noun', vi: 'tuần lễ', ex: 'I exercise three times a week.' },
     twice: { ipa: 'twaɪs', pos: 'adv', vi: 'hai lần', ex: 'Take one tablet twice a day.' },
-    a: { ipa: 'ə', pos: 'det', vi: 'một (mỗi)', ex: 'Twice a week.' },
-    because: { ipa: 'bɪˈkɑːz', pos: 'conj', vi: 'bởi vì', ex: 'I swim because it keeps me fit.' },
-    it: { ipa: 'ɪt', pos: 'pron', vi: 'nó, việc đó', ex: 'It helps me relax after work.' },
-    helps: { ipa: 'helps', pos: 'verb', vi: 'giúp đỡ, hỗ trợ', ex: 'Regular exercise helps prevent disease.' },
-    me: { ipa: 'miː', pos: 'pron', vi: 'tôi (tân ngữ)', ex: 'It helps me stay healthy.' },
     stay: { ipa: 'steɪ', pos: 'verb', vi: 'duy trì, giữ, ở lại', ex: 'How do you stay healthy?' },
-    healthy: { ipa: 'ˈhel.θi', pos: 'adj', vi: 'khỏe mạnh, lành mạnh', ex: 'A balanced diet keeps you healthy.' },
-    relax: { ipa: 'rɪˈlæks', pos: 'verb', vi: 'thư giãn, nghỉ ngơi', ex: 'Listening to music helps me relax.' },
-    after: { ipa: 'ˈæf.tɚ', pos: 'prep', vi: 'sau, sau khi', ex: 'Take the medicine after meals.' },
     long: { ipa: 'lɔːŋ', pos: 'adj/adv', vi: 'dài, bao lâu (how long)', ex: 'How long have you had this fever?' },
-    been: { ipa: 'bɪn', pos: 'verb', vi: 'đã từng (quá khứ phân từ của be)', ex: 'How long have you been waiting?' },
     experiencing: { ipa: 'ɪkˈspɪr.i.ən.sɪŋ', pos: 'verb', vi: 'trải qua, gặp phải (triệu chứng)', ex: 'Are you experiencing any dizziness?' },
-    this: { ipa: 'ðɪs', pos: 'det', vi: 'này, điều này', ex: 'How long have you had this pain?' },
     sharp: { ipa: 'ʃɑːrp', pos: 'adj', vi: 'nhói, sắc, dữ dội (đau)', ex: 'He felt a sharp pain in his abdomen.' },
-    abdominal: { ipa: 'æbˈdɑː.mɪ.nəl', pos: 'adj', vi: 'thuộc vùng bụng, ổ bụng', ex: 'Abdominal ultrasound confirmed the diagnosis.' },
-    pain: { ipa: 'peɪn', pos: 'noun', vi: 'cơn đau, sự đau đớn', ex: 'The pain started around the navel.' },
-    started: { ipa: 'ˈstɑːr.tɪd', pos: 'verb', vi: 'bắt đầu, khởi phát', ex: 'The symptoms started yesterday evening.' },
-    yesterday: { ipa: 'ˈjes.tɚ.deɪ', pos: 'adv', vi: 'hôm qua', ex: 'He was admitted to the hospital yesterday.' },
-    evening: { ipa: 'ˈiːv.nɪŋ', pos: 'noun', vi: 'buổi tối', ex: 'The fever worsened in the evening.' },
     moved: { ipa: 'muːvd', pos: 'verb', vi: 'di chuyển, lan xuống', ex: 'The pain moved to the lower right side.' },
-    lower: { ipa: 'ˈloʊ.ɚ', pos: 'adj', vi: 'phía dưới, hạ', ex: 'Pain in the right lower quadrant.' },
-    right: { ipa: 'raɪt', pos: 'adj', vi: 'bên phải, đúng', ex: 'Right lower abdominal pain.' },
     side: { ipa: 'saɪd', pos: 'noun', vi: 'bên, phía, vùng', ex: 'Does it hurt on the right side?' },
     understand: { ipa: 'ˌʌn.dɚˈstænd', pos: 'verb', vi: 'hiểu, thông cảm', ex: 'I understand you are in pain.' },
     need: { ipa: 'niːd', pos: 'verb', vi: 'cần phải', ex: 'We need to run a quick blood test.' },
     run: { ipa: 'rʌn', pos: 'verb', vi: 'tiến hành (xét nghiệm), chạy', ex: 'We will run a blood test immediately.' },
     blood: { ipa: 'blʌd', pos: 'noun', vi: 'máu, huyết', ex: 'White blood cell count was elevated.' },
     test: { ipa: 'test', pos: 'noun', vi: 'xét nghiệm, bài kiểm tra', ex: 'The blood test results are ready.' },
-    ultrasound: { ipa: 'ˈʌl.trə.saʊnd', pos: 'noun', vi: 'siêu âm', ex: 'An abdominal ultrasound is non-invasive.' },
-    immediately: { ipa: 'ɪˈmiː.di.ət.li', pos: 'adv', vi: 'ngay lập tức, tức thì', ex: 'Please notify the surgeon immediately.' },
-    please: { ipa: 'pliːz', pos: 'interj', vi: 'vui lòng, xin hãy', ex: 'Please lie down on the examination table.' },
-    take: { ipa: 'teɪk', pos: 'verb', vi: 'uống (thuốc), lấy', ex: 'Take one tablet twice a day.' },
-    one: { ipa: 'wʌn', pos: 'num', vi: 'một (1)', ex: 'Take one tablet after meals.' },
     tablet: { ipa: 'ˈtæb.lət', pos: 'noun', vi: 'viên thuốc nén', ex: 'Swallow the tablet with a glass of water.' },
-    day: { ipa: 'deɪ', pos: 'noun', vi: 'ngày', ex: 'Drink two liters of water a day.' },
     meals: { ipa: 'miːlz', pos: 'noun', vi: 'các bữa ăn', ex: 'Take the medication after meals.' },
-    days: { ipa: 'deɪz', pos: 'noun', vi: 'các ngày', ex: 'Complete the full course of seven days.' },
     getting: { ipa: 'ˈɡet.ɪŋ', pos: 'verb', vi: 'việc có được, nhận được', ex: 'Getting enough sleep is vital.' },
     enough: { ipa: 'ɪˈnʌf', pos: 'det/adv', vi: 'đủ, đầy đủ', ex: 'Are you getting enough sleep?' },
-    sleep: { ipa: 'sliːp', pos: 'noun/verb', vi: 'giấc ngủ, ngủ', ex: 'Lack of sleep weakens immunity.' },
     regular: { ipa: 'ˈreɡ.jə.lɚ', pos: 'adj', vi: 'đều đặn, thường xuyên', ex: 'Regular physical activity improves mood.' },
-    exercise: { ipa: 'ˈek.sɚ.saɪz', pos: 'noun/verb', vi: 'tập thể dục, vận động', ex: 'Regular exercise boosts your immune system.' },
-    can: { ipa: 'kæn', pos: 'verb', vi: 'có thể', ex: 'Stress can affect your digestion.' },
     significantly: { ipa: 'sɪɡˈnɪf.ɪ.kənt.li', pos: 'adv', vi: 'một cách đáng kể, rõ rệt', ex: 'His condition improved significantly.' },
-    boost: { ipa: 'buːst', pos: 'verb', vi: 'tăng cường, thúc đẩy mạnh', ex: 'Vitamin C helps boost immunity.' },
     immune: { ipa: 'ɪˈmjuːn', pos: 'adj', vi: 'miễn dịch', ex: 'A strong immune system fights infections.' },
     system: { ipa: 'ˈsɪs.təm', pos: 'noun', vi: 'hệ thống, hệ cơ quan', ex: 'The immune system protects the body.' },
     delayed: { ipa: 'dɪˈleɪd', pos: 'adj/verb', vi: 'bị trì hoãn, chậm trễ', ex: 'Delayed diagnosis can cause complications.' },
@@ -115,290 +49,78 @@
     acute: { ipa: 'əˈkjuːt', pos: 'adj', vi: 'cấp tính', ex: 'The patient has acute appendicitis.' },
     appendicitis: { ipa: 'əˌpen.dɪˈsaɪ.tɪs', pos: 'noun', vi: 'viêm ruột thừa', ex: 'Acute appendicitis requires prompt surgery.' },
     lead: { ipa: 'liːd', pos: 'verb', vi: 'dẫn đến (lead to)', ex: 'Untreated infection can lead to sepsis.' },
-    perforation: { ipa: 'ˌpɜːr.fəˈreɪ.ʃən', pos: 'noun', vi: 'sự thủng (tạng rỗng)', ex: 'Appendix perforation is a surgical emergency.' },
     generalized: { ipa: 'ˈdʒen.ər.ə.laɪzd', pos: 'adj', vi: 'toàn thể, lan tỏa khắp ổ bụng', ex: 'Generalized abdominal tenderness was noted.' },
     peritonitis: { ipa: 'ˌper.ɪ.təˈnaɪ.tɪs', pos: 'noun', vi: 'viêm phúc mạc', ex: 'Peritonitis requires urgent antibiotic therapy.' },
-    physical: { ipa: 'ˈfɪz.ɪ.kəl', pos: 'adj', vi: 'thể chất, thực thể (khám)', ex: 'Physical examination revealed rebound tenderness.' },
-    examination: { ipa: 'ɪɡˌzæm.ɪˈneɪ.ʃən', pos: 'noun', vi: 'sự thăm khám, kiểm tra', ex: 'A thorough physical examination is essential.' },
     examinations: { ipa: 'ɪɡˌzæm.ɪˈneɪ.ʃənz', pos: 'noun', vi: 'các cuộc thăm khám trực tiếp', ex: 'Telemedicine cannot replace physical examinations.' },
     revealed: { ipa: 'rɪˈviːld', pos: 'verb', vi: 'cho thấy, phát hiện ra', ex: 'The scan revealed localized inflammation.' },
     localized: { ipa: 'ˈloʊ.kə.laɪzd', pos: 'adj', vi: 'khu trú tại một vùng', ex: 'Localized pain in the right lower quadrant.' },
-    resistance: { ipa: 'rɪˈzɪs.təns', pos: 'noun', vi: 'sự đề kháng (thành bụng / kháng thuốc)', ex: 'Abdominal wall resistance was detected.' },
     positive: { ipa: 'ˈpɑː.zə.tɪv', pos: 'adj', vi: 'dương tính, tích cực', ex: 'The patient had positive rebound tenderness.' },
-    rebound: { ipa: 'ˈriː.baʊnd', pos: 'noun', vi: 'phản ứng dội (Blumberg)', ex: 'Rebound tenderness indicates peritoneal irritation.' },
-    tenderness: { ipa: 'ˈten.dɚ.nəs', pos: 'noun', vi: 'đau khi ấn khám', ex: 'Severe tenderness in the lower abdomen.' },
     requires: { ipa: 'rɪˈkwaɪɚz', pos: 'verb', vi: 'đòi hỏi, yêu cầu bắt buộc', ex: 'This condition requires immediate surgery.' },
     immediate: { ipa: 'ɪˈmiː.di.ət', pos: 'adj', vi: 'ngay lập tức, cấp cứu', ex: 'Immediate surgical consultation is needed.' },
-    surgical: { ipa: 'ˈsɜːr.dʒɪ.kəl', pos: 'adj', vi: 'thuộc phẫu thuật, ngoại khoa', ex: 'Surgical intervention was successful.' },
-    consultation: { ipa: 'ˌkɑːn.sʌlˈteɪ.ʃən', pos: 'noun', vi: ' sự hội chẩn, tư vấn bác sĩ', ex: 'We requested an urgent surgical consultation.' },
-    although: { ipa: 'ɔːlˈðoʊ', pos: 'conj', vi: 'mặc dù', ex: 'Although telemedicine is convenient, it has limits.' },
-    telemedicine: { ipa: 'ˌtel.ɪˈmed.ɪ.sɪn', pos: 'noun', vi: 'y tế từ xa, khám bệnh trực tuyến', ex: 'Telemedicine expanded rapidly in recent years.' },
     offers: { ipa: 'ˈɔː.fɚz', pos: 'verb', vi: 'mang lại, cung cấp', ex: 'Remote monitoring offers great flexibility.' },
     unprecedented: { ipa: 'ʌnˈpres.ɪ.den.tɪd', pos: 'adj', vi: 'chưa từng có tiền lệ', ex: 'Technology offers unprecedented convenience.' },
     convenience: { ipa: 'kənˈviː.ni.əns', pos: 'noun', vi: 'sự tiện lợi, thuận tiện', ex: 'Patients appreciate the convenience of online booking.' },
-    cannot: { ipa: 'ˈkæn.ɑːt', pos: 'verb', vi: 'không thể', ex: 'Online chat cannot replace hands-on diagnosis.' },
     entirely: { ipa: 'ɪnˈtaɪr.li', pos: 'adv', vi: 'hoàn toàn, tuyệt đối', ex: 'Symptoms have not entirely disappeared.' },
     replace: { ipa: 'rɪˈpleɪs', pos: 'verb', vi: 'thay thế', ex: 'AI tools assist doctors rather than replace them.' },
     overuse: { ipa: 'ˌoʊ.vɚˈjuːs', pos: 'noun', vi: 'sự lạm dụng, dùng quá mức', ex: 'The overuse of antibiotics is dangerous.' },
     'broad-spectrum': { ipa: 'ˌbrɔːdˈspek.trəm', pos: 'adj', vi: 'phổ rộng (kháng sinh)', ex: 'Broad-spectrum antibiotics target many bacteria.' },
-    antibiotics: { ipa: 'ˌæn.tɪ.baɪˈɑː.tɪks', pos: 'noun', vi: 'thuốc kháng sinh', ex: 'Antibiotics do not cure viral infections.' },
-    has: { ipa: 'hæz', pos: 'verb', vi: 'đã (trợ động từ thì hiện tại hoàn thành)', ex: 'Research has shown clear benefits.' },
     accelerated: { ipa: 'əkˈsel.ə.reɪ.tɪd', pos: 'verb', vi: 'đẩy nhanh, làm tăng tốc', ex: 'Misuse has accelerated drug resistance.' },
     emergence: { ipa: 'ɪˈmɜːr.dʒəns', pos: 'noun', vi: 'sự xuất hiện, sự nổi lên', ex: 'The emergence of new bacterial strains.' },
-    'drug-resistant': { ipa: 'ˌdrʌɡ.rɪˈzɪs.tənt', pos: 'adj', vi: 'kháng thuốc', ex: 'Drug-resistant infections are harder to treat.' },
-    bacteria: { ipa: 'bækˈtɪr.i.ə', pos: 'noun', vi: 'vi khuẩn', ex: 'Harmful bacteria can multiply quickly.' }
+    'drug-resistant': { ipa: 'ˌdrʌɡ.rɪˈzɪs.tənt', pos: 'adj', vi: 'kháng thuốc', ex: 'Drug-resistant infections are harder to treat.' }
   };
 
-  // Dữ liệu bài học đa câu (Hỗ trợ Video YouTube đồng bộ mốc thời gian + Audio ELLLO / US Neural + 3 Chế độ)
-  const DEFAULT_STUDIO_LESSONS = {
-    B1: [
-      {
-        id: 'lis_b1_1',
-        category: 'BBC Learning English · Hội thoại Đời sống',
-        title: 'Easy English Conversations: Daily Routine & Swimming',
-        youtubeId: 'zN6V2M3bE8M',
-        sourceLabel: 'BBC Learning English / YouTube & US Studio',
-        segments: [
-          {
-            text: 'Easy English conversations. How often do you go swimming? Hello, Buli. Hi Sian! What is your daily routine?',
-            vi: 'Hội thoại tiếng Anh dễ hiểu. Bạn có thường đi bơi không? Xin chào Buli. Chào Sian! Lịch trình hàng ngày của bạn là gì?',
-            start: 0,
-            end: 13,
-            ipaNote: 'Chú ý tên riêng "Sian" đọc là /ʃɑːn/ và nối âm nhẹ ở "How often do you" /haʊ ˈɔːfən də juː/.'
-          },
-          {
-            text: 'Well, I always get up at seven o\'clock. I usually have fruit and yogurt for breakfast.',
-            vi: 'À, mình luôn thức dậy vào lúc 7 giờ đúng. Mình thường ăn trái cây và sữa chua cho bữa sáng.',
-            start: 14,
-            end: 23,
-            ipaNote: 'Nối âm tự nhiên: "get up at" /ɡet ʌp æt/, trọng âm rơi vào "always", "seven", "usually", "fruit", "yogurt".'
-          },
-          {
-            text: 'Then I go to work by bus and check my emails in the morning.',
-            vi: 'Sau đó mình đi làm bằng xe buýt và kiểm tra thư điện tử vào buổi sáng.',
-            start: 24,
-            end: 31,
-            ipaNote: 'Chú ý âm đuôi /-z/ trong từ "emails" /ˈiː.meɪlz/ và cụm phương tiện "by bus".'
-          },
-          {
-            text: 'How often do you go swimming during the week?',
-            vi: 'Bạn đi bơi bao nhiêu lần trong tuần?',
-            start: 32,
-            end: 37,
-            ipaNote: 'Câu hỏi Wh-question xuống giọng nhẹ ở cuối câu "during the week".'
-          },
-          {
-            text: 'I go swimming twice a week because it helps me stay healthy and relax after work.',
-            vi: 'Mình đi bơi hai lần một tuần vì nó giúp mình giữ sức khỏe và thư giãn sau giờ làm việc.',
-            start: 38,
-            end: 47,
-            ipaNote: 'Nối âm cực hay gặp trong VSTEP: "twice a week" /twaɪs ə wiːk/ và âm cuối /-ps/ trong "helps".'
-          }
-        ],
-        mcq: {
-          question: 'Theo đoạn hội thoại, nhân vật thường ăn gì vào bữa sáng và đi bơi bao nhiêu lần mỗi tuần?',
-          options: [
-            'Ăn trái cây với sữa chua vào bữa sáng và đi bơi 2 lần/tuần',
-            'Chỉ uống cà phê sáng và đi bơi mỗi ngày',
-            'Ăn bánh mì lúc 9 giờ sáng và không biết bơi',
-            'Đi làm bằng tàu điện ngầm và tập chạy bộ buổi tối'
-          ],
-          answer: 0,
-          evidenceIdx: 1,
-          explain: 'Đáp án nằm ở Câu #2 ("I usually have fruit and yogurt for breakfast") và Câu #5 ("I go swimming twice a week").'
-        },
-        speakingPrompt: {
-          question: 'VSTEP Speaking Part 1: What is your daily routine, and what sport do you do to stay healthy?',
-          hintVi: 'Gợi ý trả lời 3 ý: (1) Giờ thức dậy & bữa sáng -> (2) Công việc/học tập ban ngày -> (3) Môn thể thao yêu thích (như bơi lội/chạy bộ) giúp giải tỏa căng thẳng.'
+  const liveIpaCache = {};
+  const pendingIpaFetches = new Set();
+
+  function getMergedWordDict() {
+    const ext = (global.LEXI_LISTENING_DATA && global.LEXI_LISTENING_DATA.WORD_DICT) || {};
+    return Object.assign({}, EXTRA_WORD_DICT, ext, liveIpaCache);
+  }
+
+  // Chuẩn hóa danh sách bài học từ /listening-lessons-data.js
+  function getLessonsForLevel(lv) {
+    const dataObj = global.LEXI_LISTENING_DATA || {};
+    const rawList = dataObj[lv] || dataObj.B1 || [];
+    return rawList.map((item) => {
+      const rawSegs = item.segments || item.transcript || [];
+      const segments = rawSegs.map((s) => ({
+        text: String(s.text || s.en || '').trim(),
+        vi: String(s.vi || '').trim(),
+        start: Number(s.start) || 0,
+        end: Number(s.end) || 6,
+        speaker: s.speaker || '',
+        ipaNote:
+          s.ipaNote ||
+          'Nghe kỹ giọng người thật trong Video hoặc bấm "🔊 Nghe US" / "Tách cụm" để luyện nhịp thở và nối âm tự nhiên.'
+      }));
+      const vstepQuestions = Array.isArray(item.vstepQuestions)
+        ? item.vstepQuestions
+        : item.mcq
+        ? [item.mcq]
+        : [];
+      return {
+        id: item.id,
+        category: item.topic || item.category || `VSTEP ${lv}`,
+        title: item.title,
+        youtubeId: item.youtubeId || '',
+        sourceLabel: item.source || item.sourceLabel || `VSTEP ${lv} Studio`,
+        duration: item.duration || '',
+        segments,
+        vstepQuestions,
+        speakingPrompt: item.speakingPrompt || {
+          question: `VSTEP Speaking (${lv}): Summarize the main ideas of "${item.title}" and share your personal experience on this topic.`,
+          hintVi:
+            'Gợi ý: Tóm tắt 2-3 ý chính bạn vừa nghe được từ bài học, sau đó liên hệ với thói quen hoặc trải nghiệm thực tế của bản thân.'
         }
-      },
-      {
-        id: 'lis_b1_2',
-        category: 'Giao tiếp Y khoa & Phòng khám (B1)',
-        title: 'Khám triệu chứng đau bụng cấp & Hướng dẫn dùng thuốc',
-        youtubeId: '',
-        sourceLabel: 'Clinical Dialogue · Chuẩn US Neural',
-        segments: [
-          {
-            text: 'How long have you been experiencing this sharp abdominal pain?',
-            vi: 'Bạn đã bị cơn đau bụng nhói này bao lâu rồi?',
-            start: 0,
-            end: 6,
-            ipaNote: 'Nối âm "have you been" /həv jə bɪn/, nhấn rõ "experiencing", "sharp", "abdominal pain".'
-          },
-          {
-            text: 'The pain started yesterday evening and moved to my lower right side.',
-            vi: 'Cơn đau bắt đầu từ tối hôm qua và đã lan xuống vùng bụng dưới bên phải của tôi.',
-            start: 6,
-            end: 13,
-            ipaNote: 'Chú ý phát âm đuôi /-ɪd/ trong "started" /ˈstɑːr.tɪd/ và /-d/ trong "moved" /muːvd/.'
-          },
-          {
-            text: 'I understand. We need to run a blood test and an abdominal ultrasound immediately.',
-            vi: 'Tôi hiểu rồi. Chúng tôi cần làm xét nghiệm máu và siêu âm ổ bụng ngay lập tức.',
-            start: 13,
-            end: 21,
-            ipaNote: 'Nhấn trọng âm từ "ultrasound" /ˈʌl.trə.saʊnd/ ở âm tiết đầu và "immediately" /ɪˈmiː.di.ət.li/.'
-          },
-          {
-            text: 'Please take one tablet twice a day after meals for seven days.',
-            vi: 'Vui lòng uống mỗi lần 1 viên, ngày 2 lần sau bữa ăn trong vòng 7 ngày.',
-            start: 21,
-            end: 28,
-            ipaNote: 'Cụm chỉ định thuốc kinh điển: "twice a day" /twaɪs ə deɪ/, phát âm rõ âm /-z/ ở "meals" và "days".'
-          }
-        ],
-        mcq: {
-          question: 'Bác sĩ chỉ định thực hiện cận lâm sàng gì ngay lập tức khi bệnh nhân báo đau lan xuống vùng bụng dưới bên phải?',
-          options: [
-            'Xét nghiệm máu (blood test) và siêu âm ổ bụng (abdominal ultrasound)',
-            'Chỉ cho thuốc giảm đau về nhà theo dõi 1 tháng',
-            'Chụp cộng hưởng từ sọ não',
-            'Yêu cầu bệnh nhân nhịn uống nước trong 3 ngày'
-          ],
-          answer: 0,
-          evidenceIdx: 2,
-          explain: 'Trong Câu #3, bác sĩ nói rõ: "We need to run a blood test and an abdominal ultrasound immediately."'
-        },
-        speakingPrompt: {
-          question: 'Roleplay Lâm sàng / VSTEP B1: A patient complains of sharp abdominal pain. Ask about the onset and explain the tests needed.',
-          hintVi: 'Sử dụng cấu trúc Câu #1 (How long have you been experiencing...) và Câu #3 (We need to run a blood test and an ultrasound...).'
-        }
-      },
-      {
-        id: 'lis_b1_3',
-        category: 'ELLLO.org #1430 · Sức khỏe & Lối sống (B1)',
-        title: 'Taking Care of Physical Health & Immune System',
-        youtubeId: '',
-        sourceLabel: 'ELLLO.org Health Series · Chuẩn US Neural',
-        segments: [
-          {
-            text: 'Getting enough sleep and regular exercise can significantly boost your immune system.',
-            vi: 'Ngủ đủ giấc và tập thể dục đều đặn có thể tăng cường đáng kể hệ miễn dịch của bạn.',
-            start: 0,
-            end: 8,
-            ipaNote: 'Nhấn mạnh các cụm danh từ cốt lõi: "enough sleep", "regular exercise", "immune system".'
-          },
-          {
-            text: 'We also need to reschedule our weekly team meeting to Thursday afternoon so everyone can rest.',
-            vi: 'Chúng ta cũng cần dời lịch buổi họp nhóm hàng tuần sang chiều thứ Năm để mọi người có thời gian nghỉ ngơi.',
-            start: 8,
-            end: 16,
-            ipaNote: 'Phân biệt rõ "Tuesday" (Thứ Ba) và "Thursday" (/ˈθɜːrz.deɪ/ - Thứ Năm có âm /θ/ đặt lưỡi giữa hai hàm răng).'
-          }
-        ],
-        mcq: {
-          question: 'Hai yếu tố tự nhiên nào giúp tăng cường đáng kể hệ miễn dịch được nhắc đến trong bài?',
-          options: [
-            'Ngủ đủ giấc (enough sleep) và tập thể dục đều đặn (regular exercise)',
-            'Làm việc khuya và uống nhiều nước ngọt có ga',
-            'Dời lịch họp sang ngày Chủ nhật',
-            'Sử dụng kháng sinh liều cao mỗi ngày'
-          ],
-          answer: 0,
-          evidenceIdx: 0,
-          explain: 'Câu #1 khẳng định: "Getting enough sleep and regular exercise can significantly boost your immune system."'
-        },
-        speakingPrompt: {
-          question: 'VSTEP Speaking Part 2: How do you maintain a healthy lifestyle when you have a busy schedule?',
-          hintVi: 'Kết hợp từ vựng "getting enough sleep", "regular exercise", và "boost my immune system".'
-        }
-      }
-    ],
-    B2: [
-      {
-        id: 'lis_b2_1',
-        category: 'Y khoa - Lâm sàng Chuyên sâu (B2)',
-        title: 'Chẩn đoán Viêm ruột thừa cấp & Biến chứng Viêm phúc mạc',
-        youtubeId: '',
-        sourceLabel: 'Clinical Grand Rounds · Chuẩn US Neural',
-        segments: [
-          {
-            text: 'Delayed diagnosis of acute appendicitis can lead to perforation and generalized peritonitis.',
-            vi: 'Chẩn đoán muộn viêm ruột thừa cấp có thể dẫn đến thủng tạng và viêm phúc mạc toàn thể.',
-            start: 0,
-            end: 8,
-            ipaNote: 'Chú ý âm đuôi /-d/ trong "Delayed", trọng âm "per-fo-RA-tion" /ˌpɜːr.fəˈreɪ.ʃən/ và "pe-ri-to-NI-tis" /ˌper.ɪ.təˈnaɪ.tɪs/.'
-          },
-          {
-            text: 'Physical examination revealed localized abdominal resistance and positive rebound tenderness.',
-            vi: 'Thăm khám thực thể phát hiện đề kháng thành bụng khu trú và dấu hiệu cảm ứng phúc mạc (phản ứng dội) dương tính.',
-            start: 8,
-            end: 16,
-            ipaNote: 'Cụm lâm sàng đắt giá: "localized abdominal resistance" và "positive rebound tenderness".'
-          },
-          {
-            text: 'This clinical condition requires immediate surgical consultation and broad-spectrum antibiotics.',
-            vi: 'Tình trạng lâm sàng này đòi hỏi phải hội chẩn ngoại khoa ngay lập tức và dùng kháng sinh phổ rộng.',
-            start: 16,
-            end: 24,
-            ipaNote: 'Chú ý phát âm "surgical consultation" /ˈsɜːr.dʒɪ.kəl ˌkɑːn.sʌlˈteɪ.ʃən/.'
-          }
-        ],
-        mcq: {
-          question: 'Biến chứng nguy hiểm nào xảy ra khi chẩn đoán viêm ruột thừa cấp (acute appendicitis) bị chậm trễ?',
-          options: [
-            'Thủng ruột thừa (perforation) và viêm phúc mạc toàn thể (generalized peritonitis)',
-            'Chỉ gây đau đầu nhẹ và tự khỏi sau 24 giờ',
-            'Làm giảm nhịp tim tạm thời',
-            'Không cần can thiệp ngoại khoa'
-          ],
-          answer: 0,
-          evidenceIdx: 0,
-          explain: 'Câu #1 nêu rõ cấu trúc nhân quả: "Delayed diagnosis of acute appendicitis can lead to perforation and generalized peritonitis."'
-        },
-        speakingPrompt: {
-          question: 'Clinical Presentation / VSTEP B2: Summarize the physical examination findings and management of acute appendicitis with suspected peritonitis.',
-          hintVi: 'Dùng chuỗi thuật ngữ: localized abdominal resistance -> positive rebound tenderness -> immediate surgical consultation.'
-        }
-      },
-      {
-        id: 'lis_b2_2',
-        category: 'Học thuật VSTEP Part 3 & Y tế số (B2)',
-        title: 'Telemedicine & Global Antibiotic Resistance',
-        youtubeId: '',
-        sourceLabel: 'VSTEP Academic Lecture · Chuẩn US Neural',
-        segments: [
-          {
-            text: 'Although telemedicine offers unprecedented convenience, it cannot entirely replace physical examinations.',
-            vi: 'Mặc dù y tế từ xa mang lại sự tiện lợi chưa từng có, nó không thể thay thế hoàn toàn việc thăm khám trực tiếp.',
-            start: 0,
-            end: 8,
-            ipaNote: 'Từ vựng ăn điểm C1/B2: "unprecedented" /ʌnˈpres.ɪ.den.tɪd/ (chưa từng có tiền lệ).'
-          },
-          {
-            text: 'The overuse of broad-spectrum antibiotics has accelerated the emergence of drug-resistant bacteria.',
-            vi: 'Việc lạm dụng kháng sinh phổ rộng đã đẩy nhanh sự xuất hiện của vi khuẩn kháng thuốc.',
-            start: 8,
-            end: 17,
-            ipaNote: 'Nối âm học thuật: "has accelerated" /həz əkˈsel.ə.reɪ.tɪd/, "emergence of" /ɪˈmɜːr.dʒəns əv/.'
-          }
-        ],
-        mcq: {
-          question: 'Quan điểm chính của bài giảng về y tế từ xa (telemedicine) và kháng sinh là gì?',
-          options: [
-            'Y tế từ xa rất tiện lợi nhưng không thể thay thế hoàn toàn khám trực tiếp, và lạm dụng kháng sinh làm tăng vi khuẩn kháng thuốc',
-            'Y tế từ xa đã thay thế 100% các bệnh viện và kháng sinh phổ rộng hoàn toàn vô hại',
-            'Vi khuẩn kháng thuốc đang giảm dần nhờ công nghệ số',
-            'Khám lâm sàng trực tiếp không còn cần thiết trong y học hiện đại'
-          ],
-          answer: 0,
-          evidenceIdx: 0,
-          explain: 'Kết hợp mệnh đề chính ở Câu #1 ("cannot entirely replace physical examinations") và Câu #2 ("accelerated the emergence of drug-resistant bacteria").'
-        },
-        speakingPrompt: {
-          question: 'VSTEP Speaking Part 3: Should online medical consultations completely replace traditional hospital visits?',
-          hintVi: 'Sử dụng cấu trúc nhượng bộ B2: "Although telemedicine offers unprecedented convenience, it cannot entirely replace physical examinations because..."'
-        }
-      }
-    ]
-  };
+      };
+    });
+  }
 
   // Trạng thái nội bộ của Studio
   let curLessonIdx = 0;
   let curSegIdx = 0;
   let studioMode = 'shadowing'; // 'shadowing' | 'dictation' | 'vstep'
-  let mediaTab = 'audio'; // 'video' | 'audio'
+  let mediaTab = 'video'; // Mặc định ưu tiên 'video' nếu bài học có youtubeId
   let leftSubTab = 'subtitles'; // 'subtitles' | 'guide'
   let showIPA = true;
   let showTrans = true;
@@ -419,39 +141,73 @@
   let speechRec = null;
   let liveTranscript = '';
 
-  // Bộ nhớ kết quả thu âm theo từng câu: key = `${lessonId}_${segIdx}_${mergeNext ? 2 : 1}`
-  // value = { transcript, audioUrl, durationSec, wordResults: [{ word, status: 'correct'|'near'|'wrong', spokenWord }], pct, aiCoachHtml }
+  // Bộ nhớ kết quả thu âm theo từng câu: key = `${lesson.id}_${segIdx}_${mergeNext ? 2 : 1}`
   const recordingStore = {};
 
-  function getCustomLessons() {
-    try {
-      const raw = localStorage.getItem(LS_STUDIO_CUSTOM_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      return [];
-    }
-  }
+  // Bộ nhớ đáp án đã chọn cho bộ câu hỏi VSTEP: key = `${lesson.id}_${qIdx}`
+  const vstepAnswersStore = {};
 
-  function saveCustomLessons(list) {
-    try {
-      localStorage.setItem(LS_STUDIO_CUSTOM_KEY, JSON.stringify(list));
-    } catch (e) {}
-  }
-
-  function getLessonsForLevel(lv) {
-    const base = DEFAULT_STUDIO_LESSONS[lv] || DEFAULT_STUDIO_LESSONS.B1;
-    const custom = getCustomLessons().filter((c) => !c.level || c.level === lv);
-    return [...base, ...custom];
-  }
+  // Quản lý Trình phát YouTube IFrame API (Giọng người thật + Karaoke chữ chạy thời gian thực)
+  let ytApiLoaded = false;
+  let ytPlayer = null;
+  let ytPlayerReady = false;
+  let currentYtVideoId = '';
+  let preservedYtWrapEl = null;
+  let karaokeTimerId = null;
+  let activeHighlightedWordIdx = -1;
 
   function cleanWordToken(w) {
     return String(w || '')
       .toLowerCase()
-      .replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, '');
+      .replace(/^[^a-z0-9'-]+|[^a-z0-9'-]+$/g, '');
   }
 
-  // Tìm từ trong Kho từ vựng của người dùng hoặc từ điển tích hợp
+  function stripSlashes(ipaStr) {
+    return String(ipaStr || '')
+      .trim()
+      .replace(/^\/+|\/+$/g, '');
+  }
+
+  // Tự động tra cứu phiên âm IPA chuẩn từ DictionaryAPI nếu gặp từ hiếm chưa có trong từ điển tĩnh
+  function fetchLiveIpaIfNeeded(cleanWord) {
+    if (!cleanWord || cleanWord.length < 2 || pendingIpaFetches.has(cleanWord)) return;
+    pendingIpaFetches.add(cleanWord);
+    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!Array.isArray(data) || !data[0]) return;
+        const entry = data[0];
+        let foundIpa = entry.phonetic || '';
+        if (!foundIpa && Array.isArray(entry.phonetics)) {
+          const pObj = entry.phonetics.find((p) => p && p.text);
+          if (pObj) foundIpa = pObj.text;
+        }
+        const cleanIpa = stripSlashes(foundIpa);
+        if (cleanIpa) {
+          const firstMeaning =
+            entry.meanings &&
+            entry.meanings[0] &&
+            entry.meanings[0].definitions &&
+            entry.meanings[0].definitions[0]
+              ? entry.meanings[0].definitions[0].definition
+              : '';
+          const pos = (entry.meanings && entry.meanings[0] && entry.meanings[0].partOfSpeech) || 'word';
+          liveIpaCache[cleanWord] = {
+            ipa: cleanIpa,
+            pos,
+            vi: firstMeaning || 'Bấm "🔊 US" để nghe phát âm chuẩn',
+            ex: ''
+          };
+          // Cập nhật ngay trên giao diện mà không cần render lại toàn trang
+          document.querySelectorAll(`[data-studio-ipa-word="${cleanWord}"]`).forEach((el) => {
+            el.textContent = `/${cleanIpa}/`;
+          });
+        }
+      })
+      .catch(() => {});
+  }
+
+  // Tìm từ trong Kho từ vựng cá nhân hoặc Từ điển chuẩn Oxford/Cambridge
   function lookupWordInfo(rawWord) {
     const clean = cleanWordToken(rawWord);
     if (!clean) {
@@ -464,10 +220,10 @@
       if (rawVault) {
         const db = JSON.parse(rawVault);
         const found = (db.words || []).find((w) => cleanWordToken(w.word) === clean);
-        if (found) {
+        if (found && found.ipa) {
           return {
             word: found.word,
-            ipa: String(found.ipa || '').replace(/^\/|\/$/g, ''),
+            ipa: stripSlashes(found.ipa),
             pos: found.pos || 'word',
             vi: found.meaning || '',
             ex: found.example || '',
@@ -477,26 +233,41 @@
       }
     } catch (e) {}
 
-    // 2. Tìm trong từ điển tích hợp sẵn
-    if (BUILTIN_WORD_DICT[clean]) {
-      const d = BUILTIN_WORD_DICT[clean];
-      return {
-        word: clean,
-        ipa: d.ipa,
-        pos: d.pos,
-        vi: d.vi,
-        ex: d.ex,
-        inVault: false
-      };
+    // 2. Tìm trong từ điển tổng hợp (bao gồm /listening-lessons-data.js)
+    const dict = getMergedWordDict();
+    const baseCandidates = [
+      clean,
+      clean.replace(/'s$/g, ''),
+      clean.replace(/s$/g, ''),
+      clean.replace(/ed$/g, ''),
+      clean.replace(/ing$/g, '')
+    ];
+
+    for (let i = 0; i < baseCandidates.length; i++) {
+      const cand = baseCandidates[i];
+      if (cand && dict[cand]) {
+        const d = dict[cand];
+        let finalIpa = stripSlashes(d.ipa);
+        if (i === 1 && !finalIpa.endsWith('z') && !finalIpa.endsWith('s')) finalIpa += 'z';
+        return {
+          word: clean,
+          ipa: finalIpa,
+          pos: d.pos || 'word',
+          vi: d.vi || '',
+          ex: d.ex || '',
+          inVault: false
+        };
+      }
     }
 
-    // 3. Bộ quy tắc suy luận phiên âm IPA tự động chuẩn xác cho từ tiếng Anh bất kỳ
+    // 3. Kích hoạt tra cứu IPA chuẩn trực tuyến cho từ hiếm và dùng bộ quy tắc IPA dự phòng
+    fetchLiveIpaIfNeeded(clean);
     const autoIpa = approximateEnglishIPA(clean);
     return {
       word: clean,
       ipa: autoIpa,
       pos: 'word',
-      vi: 'Bấm "🔊 US" để nghe hoặc lưu vào Kho từ vựng để AI phân tích chi tiết',
+      vi: 'Bấm "🔊 US" để nghe phát âm hoặc lưu vào Kho từ vựng',
       ex: '',
       inVault: false
     };
@@ -511,6 +282,7 @@
       .replace(/ous$/g, 'əs')
       .replace(/itis$/g, 'ˈaɪ.tɪs')
       .replace(/ology$/g, 'ˈɑː.lə.dʒi')
+      .replace(/ture$/g, 'tʃɚ')
       .replace(/ing$/g, 'ɪŋ')
       .replace(/ed$/g, 'd')
       .replace(/ly$/g, 'li')
@@ -530,9 +302,276 @@
       .replace(/oa/g, 'oʊ')
       .replace(/igh/g, 'aɪ')
       .replace(/qu/g, 'kw')
+      .replace(/j/g, 'dʒ')
+      .replace(/y$/g, 'i')
       .replace(/c(?=[eiy])/g, 's')
       .replace(/c/g, 'k');
     return s;
+  }
+
+  // Quản lý hiệu ứng tô sáng từng từ theo thời gian thực (Karaoke Sync)
+  function clearKaraokeTimer() {
+    if (karaokeTimerId) {
+      clearInterval(karaokeTimerId);
+      karaokeTimerId = null;
+    }
+    if (activeHighlightedWordIdx !== -1) {
+      document.querySelectorAll('[data-studio-word-idx]').forEach((btn) => {
+        btn.classList.remove(
+          'bg-emerald-500/25',
+          'ring-2',
+          'ring-emerald-400',
+          'scale-105',
+          'shadow-md'
+        );
+      });
+      activeHighlightedWordIdx = -1;
+    }
+    const statusEl = document.getElementById('studio-live-sync-badge');
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.classList.add('hidden');
+    }
+  }
+
+  function highlightWordAtIndex(wIdx, labelText) {
+    if (wIdx !== activeHighlightedWordIdx) {
+      document.querySelectorAll('[data-studio-word-idx]').forEach((btn) => {
+        const idx = Number(btn.getAttribute('data-studio-word-idx'));
+        if (idx === wIdx) {
+          btn.classList.add(
+            'bg-emerald-500/25',
+            'ring-2',
+            'ring-emerald-400',
+            'scale-105',
+            'shadow-md'
+          );
+        } else {
+          btn.classList.remove(
+            'bg-emerald-500/25',
+            'ring-2',
+            'ring-emerald-400',
+            'scale-105',
+            'shadow-md'
+          );
+        }
+      });
+      activeHighlightedWordIdx = wIdx;
+    }
+    const statusEl = document.getElementById('studio-live-sync-badge');
+    if (statusEl && labelText) {
+      statusEl.textContent = labelText;
+      statusEl.classList.remove('hidden');
+    }
+  }
+
+  // Nạp YouTube IFrame Player API để điều khiển phát giọng người thật theo đúng mốc startSec -> endSec
+  function ensureYouTubeIframeAPI(onReadyCallback) {
+    if (global.YT && global.YT.Player) {
+      ytApiLoaded = true;
+      if (typeof onReadyCallback === 'function') onReadyCallback();
+      return;
+    }
+    const prevCb = global.onYouTubeIframeAPIReady;
+    global.onYouTubeIframeAPIReady = function () {
+      ytApiLoaded = true;
+      if (typeof prevCb === 'function') prevCb();
+      if (typeof onReadyCallback === 'function') onReadyCallback();
+    };
+    if (!document.getElementById('lexi-yt-iframe-api-script')) {
+      const tag = document.createElement('script');
+      tag.id = 'lexi-yt-iframe-api-script';
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+    }
+  }
+
+  function mountOrUpdateYouTubePlayer(videoId, startSec, endSec) {
+    const stageEl = document.getElementById('studio-yt-stage');
+    if (!stageEl || !videoId) return;
+
+    // Nếu đã có trình phát YouTube của đúng videoId này, gắn lại vào stage để giữ nguyên trạng thái đã mở khóa âm thanh trên iPad
+    if (preservedYtWrapEl && currentYtVideoId === videoId && ytPlayer) {
+      if (!stageEl.contains(preservedYtWrapEl)) {
+        stageEl.innerHTML = '';
+        stageEl.appendChild(preservedYtWrapEl);
+      }
+      return;
+    }
+
+    // Nếu đổi sang bài học có videoId khác, hủy player cũ và tạo mới
+    if (ytPlayer && typeof ytPlayer.destroy === 'function') {
+      try {
+        ytPlayer.destroy();
+      } catch (e) {}
+    }
+    ytPlayer = null;
+    ytPlayerReady = false;
+    currentYtVideoId = videoId;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'studio-yt-player-wrap';
+    wrap.className = 'w-full h-full';
+    const playerDiv = document.createElement('div');
+    playerDiv.id = 'studio-yt-player-instance';
+    playerDiv.className = 'w-full h-full';
+    wrap.appendChild(playerDiv);
+
+    stageEl.innerHTML = '';
+    stageEl.appendChild(wrap);
+    preservedYtWrapEl = wrap;
+
+    ensureYouTubeIframeAPI(() => {
+      if (!document.getElementById('studio-yt-player-instance')) return;
+      try {
+        ytPlayer = new global.YT.Player('studio-yt-player-instance', {
+          videoId: videoId,
+          width: '100%',
+          height: '100%',
+          playerVars: {
+            autoplay: 0,
+            playsinline: 1,
+            rel: 0,
+            modestbranding: 1,
+            enablejsapi: 1,
+             start: Math.floor(startSec || 0),
+            origin: global.location && global.location.origin ? global.location.origin : undefined
+          },
+          events: {
+            onReady: function () {
+              ytPlayerReady = true;
+              try {
+                if (typeof ytPlayer.setPlaybackRate === 'function') {
+                  ytPlayer.setPlaybackRate(playbackSpeed);
+                }
+              } catch (e) {}
+            }
+          }
+        });
+      } catch (e) {}
+    });
+  }
+
+  // Phát câu hiện tại bằng Giọng Người Thật trong Video YouTube + chạy chữ Karaoke thời gian thực
+  function playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, fallbackText) {
+    clearKaraokeTimer();
+    if (typeof global.stopAudioPlayback === 'function') {
+      global.stopAudioPlayback();
+    }
+
+    const totalWords = Math.max(1, Number(wordsCount) || 1);
+    const sSec = Math.max(0, Number(startSec) || 0);
+    const eSec = Math.max(sSec + 1.5, Number(endSec) || sSec + 5);
+    const segDuration = eSec - sSec;
+
+    if (ytPlayer && ytPlayerReady && typeof ytPlayer.seekTo === 'function') {
+      try {
+        if (typeof ytPlayer.setPlaybackRate === 'function') {
+          ytPlayer.setPlaybackRate(playbackSpeed);
+        }
+        ytPlayer.seekTo(sSec, true);
+        ytPlayer.playVideo();
+
+        karaokeTimerId = setInterval(() => {
+          if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') {
+            clearKaraokeTimer();
+            return;
+          }
+          const curT = Number(ytPlayer.getCurrentTime()) || 0;
+          const playerState =
+            typeof ytPlayer.getPlayerState === 'function' ? ytPlayer.getPlayerState() : 1;
+
+          if (curT >= sSec - 0.25 && curT <= eSec + 0.15) {
+            const progress = Math.max(0, Math.min(0.999, (curT - sSec) / segDuration));
+            const wIdx = Math.floor(progress * totalWords);
+            highlightWordAtIndex(
+              wIdx,
+              `🎬 Giọng người thật: ${curT.toFixed(1)}s / ${eSec.toFixed(1)}s`
+            );
+          }
+
+          if (curT >= eSec) {
+            if (loopSegment) {
+              ytPlayer.seekTo(sSec, true);
+              ytPlayer.playVideo();
+            } else {
+              try {
+                ytPlayer.pauseVideo();
+              } catch (e) {}
+              clearKaraokeTimer();
+            }
+          } else if (playerState === 2 || playerState === 0) {
+            // Đã tạm dừng hoặc kết thúc
+            if (curT > sSec + 0.4) {
+              clearKaraokeTimer();
+            }
+          }
+        }, 60);
+        return true;
+      } catch (e) {}
+    }
+
+    // Nếu trình phát YouTube đang khởi tạo lần đầu, chờ sẵn sàng rồi phát ngay
+    if (fallbackText) {
+      ensureYouTubeIframeAPI(() => {
+        setTimeout(() => {
+          if (ytPlayer && ytPlayerReady) {
+            playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, '');
+          }
+        }, 350);
+      });
+    }
+    return false;
+  }
+
+  // Phát câu hiện tại bằng Giọng Chuẩn Mỹ (🔊 Nghe US) kèm hiệu ứng chữ chạy sáng thời gian thực
+  function playSentenceUSWithKaraoke(text, wordsCount) {
+    clearKaraokeTimer();
+    if (ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
+      try {
+        ytPlayer.pauseVideo();
+      } catch (e) {}
+    }
+    if (typeof global.setAudioPlaybackRate === 'function') {
+      global.setAudioPlaybackRate(playbackSpeed);
+    }
+
+    const totalWords = Math.max(1, Number(wordsCount) || 1);
+    const startTs = Date.now();
+    const estimatedDurationMs = Math.max(1600, (totalWords * 370) / (playbackSpeed || 1));
+
+    karaokeTimerId = setInterval(() => {
+      const sharedAudio =
+        typeof global.getSharedAudioElement === 'function' ? global.getSharedAudioElement() : null;
+      let progress = 0;
+      if (
+        sharedAudio &&
+        !sharedAudio.paused &&
+        sharedAudio.duration &&
+        isFinite(sharedAudio.duration) &&
+        sharedAudio.duration > 0.3
+      ) {
+        progress = Math.max(0, Math.min(0.999, sharedAudio.currentTime / sharedAudio.duration));
+      } else {
+        const elapsed = Date.now() - startTs;
+        progress = Math.max(0, Math.min(0.999, elapsed / estimatedDurationMs));
+      }
+      const wIdx = Math.floor(progress * totalWords);
+      highlightWordAtIndex(wIdx, `🔊 Đang đọc chuẩn US (${playbackSpeed}x)...`);
+    }, 60);
+
+    if (typeof global.speakUS === 'function') {
+      global.speakUS(text, {
+        onComplete: () => {
+          clearKaraokeTimer();
+          if (loopSegment) {
+            setTimeout(() => {
+              if (loopSegment) playSentenceUSWithKaraoke(text, wordsCount);
+            }, 650);
+          }
+        }
+      });
+    }
   }
 
   // Tính khoảng cách Levenshtein để chấm từ Gần đúng (Thẻ Vàng ▲) vs Đúng (Thẻ Xanh ✓) vs Sai (Thẻ Đỏ ✗)
@@ -541,7 +580,6 @@
     const s2 = cleanWordToken(b);
     if (!s1 || !s2) return 0;
     if (s1 === s2) return 1;
-    // Khớp số nhiều / quá khứ đơn giản (VD: conversation vs conversations)
     if (s1 + 's' === s2 || s2 + 's' === s1 || s1 + 'ed' === s2 || s2 + 'ed' === s1) {
       return 0.82;
     }
@@ -583,7 +621,6 @@
       let bestIdx = -1;
       let bestSim = 0;
 
-      // Ưu tiên tìm từ khớp trong cửa sổ lân cận vị trí câu
       for (let sIdx = 0; sIdx < spokenTokens.length; sIdx++) {
         if (usedSpoken.has(sIdx)) continue;
         const sim = wordSimilarity(cleanT, spokenTokens[sIdx]);
@@ -617,7 +654,6 @@
         };
       }
 
-      // Tìm từ người học đã nói thay thế vào vị trí này (nếu có) để AI chỉ lỗi thay thế từ
       const subCandidate =
         tIdx < spokenTokens.length && !usedSpoken.has(tIdx) ? spokenTokens[tIdx] : '';
 
@@ -643,7 +679,7 @@
     };
   }
 
-  // Tạo nội dung nhận xét phát âm 4 mục giống hệt cấu trúc "AI Huấn luyện phát âm" trong video Senglish
+  // Tạo nội dung nhận xét phát âm 4 mục chi tiết
   function buildAICoachFeedbackHTML(targetText, spokenText, evalResult, esc) {
     const correctWords = evalResult.wordResults
       .filter((w) => w.status === 'correct')
@@ -747,7 +783,7 @@
     const segs = lesson.segments || [];
     if (curSegIdx >= segs.length) curSegIdx = 0;
 
-    const firstSeg = segs[curSegIdx] || { text: '', vi: '', start: 0, end: 8, ipaNote: '' };
+    const firstSeg = segs[curSegIdx] || { text: '', vi: '', start: 0, end: 5, ipaNote: '' };
     const secondSeg =
       mergeNext && curSegIdx + 1 < segs.length ? segs[curSegIdx + 1] : null;
 
@@ -757,8 +793,10 @@
     const combinedVi = secondSeg
       ? `${firstSeg.vi.trim()} ${secondSeg.vi.trim()}`
       : firstSeg.vi.trim();
-    const startSec = firstSeg.start || 0;
-    const endSec = secondSeg ? secondSeg.end || startSec + 12 : firstSeg.end || startSec + 7;
+    const startSec = Number(firstSeg.start) || 0;
+    const endSec = secondSeg
+      ? Number(secondSeg.end) || startSec + 10
+      : Number(firstSeg.end) || startSec + 5;
     const ipaNote = secondSeg
       ? `${firstSeg.ipaNote || ''} · ${secondSeg.ipaNote || ''}`
       : firstSeg.ipaNote || '';
@@ -803,6 +841,11 @@
   }
 
   function render(lv, state) {
+    // Tạm tách khung YouTube Player trước khi cập nhật DOM để trình phát không bị tải lại
+    if (preservedYtWrapEl && preservedYtWrapEl.parentNode) {
+      preservedYtWrapEl.parentNode.removeChild(preservedYtWrapEl);
+    }
+
     const esc = global.LexiAcademy.esc;
     const ctx = getActiveLessonAndSegment(lv);
     const {
@@ -828,18 +871,19 @@
       ? global.LexiAcademy.compareTokens(combinedText, savedDictation)
       : null;
 
-    // Tạo giao diện từng từ kèm IPA bên dưới (chạm vào từ để mở Popover tra nghĩa & lưu từ)
+    // Tạo giao diện từng từ kèm IPA chuẩn Oxford/Cambridge bên dưới (hỗ trợ Karaoke Highlight & chạm từ tra nghĩa)
     const interactiveWordsHTML = wordsArr
       .map((rawW, wIdx) => {
         const cleanW = cleanWordToken(rawW);
         const info = lookupWordInfo(cleanW);
         const isPopOpen = activePopoverWord && activePopoverWord.idx === wIdx;
+        const cleanIpaDisplay = stripSlashes(info.ipa || cleanW);
         return `
           <button
             type="button"
             data-studio-word="${esc(rawW)}"
             data-studio-word-idx="${wIdx}"
-            class="group inline-flex flex-col items-center px-1.5 py-1 rounded-lg transition cursor-pointer select-none ${
+            class="group inline-flex flex-col items-center px-1.5 py-1 rounded-lg transition-all duration-150 cursor-pointer select-none ${
               isPopOpen
                 ? 'bg-pink-500/20 ring-1 ring-pink-400/60'
                 : 'hover:bg-line/30'
@@ -851,9 +895,11 @@
             }">${esc(rawW)}</span>
             ${
               showIPA
-                ? `<span class="text-[11px] font-mono text-mute leading-tight mt-0.5">${esc(
-                    info.ipa || cleanW
-                  )}</span>`
+                ? `<span data-studio-ipa-word="${esc(
+                    cleanW
+                  )}" class="text-[11px] font-mono text-sky-300/85 leading-tight mt-0.5">/${esc(
+                    cleanIpaDisplay
+                  )}/</span>`
                 : ''
             }
           </button>
@@ -870,7 +916,7 @@
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-2">
             <div class="flex items-center gap-2">
               <b class="text-base text-fg font-bold">${esc(pInfo.word)}</b>
-              <span class="font-mono text-pink-400">/${esc(pInfo.ipa)}/</span>
+              <span class="font-mono text-pink-400">/${esc(stripSlashes(pInfo.ipa))}/</span>
               <span class="text-mute italic">(${esc(pInfo.pos)})</span>
               <button type="button" data-pop-speak="${esc(
                 pInfo.word
@@ -883,7 +929,7 @@
                 type="button"
                 id="studio-pop-save-word"
                 data-word="${esc(pInfo.word)}"
-                data-ipa="/${esc(pInfo.ipa)}/"
+                data-ipa="/${esc(stripSlashes(pInfo.ipa))}/"
                 data-pos="${esc(pInfo.pos)}"
                 data-meaning="${esc(pInfo.vi)}"
                 data-ex="${esc(combinedText)}"
@@ -909,7 +955,7 @@
       `;
     }
 
-    // Tạo các ô từ ẩn [ •••• ] hoặc Thẻ từ chấm điểm Xanh (✓) / Vàng (▲) / Đỏ (✗) giống video Senglish
+    // Tạo các ô từ ẩn [ •••• ] hoặc Thẻ từ chấm điểm Xanh (✓) / Vàng (▲) / Đỏ (✗)
     const wordSlotsHTML = savedRec
       ? savedRec.wordResults
           .map((wr) => {
@@ -944,35 +990,115 @@
           })
           .join('');
 
+    // Tạo danh sách 3-4 câu hỏi Nghe hiểu VSTEP bằng Tiếng Anh (100% English Questions & Options)
+    const vstepQuestions = lesson.vstepQuestions || [];
+    const vstepQuestionsHTML = vstepQuestions
+      .map((q, qIdx) => {
+        const ansKey = `${lesson.id}_${qIdx}`;
+        const picked =
+          typeof vstepAnswersStore[ansKey] === 'number' ? vstepAnswersStore[ansKey] : null;
+        const isAnswered = picked !== null;
+        const isCorrect = isAnswered && picked === q.answer;
+        const evIdx = typeof q.evidenceIdx === 'number' ? q.evidenceIdx : 0;
+
+        return `
+          <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="px-2.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-300 font-mono text-xs font-bold">
+                VSTEP Question ${qIdx + 1}/${vstepQuestions.length}
+              </span>
+              <button
+                type="button"
+                data-vstep-jump-seg="${evIdx}"
+                class="text-[11px] font-mono text-sky-400 hover:underline cursor-pointer"
+                title="Chuyển tới và nghe câu chứa bằng chứng trả lời"
+              >
+                🔊 Nghe câu bằng chứng (#${evIdx + 1})
+              </button>
+            </div>
+
+            <p class="text-sm sm:text-base font-bold text-fg leading-snug">${esc(q.question)}</p>
+
+            <div class="space-y-2">
+              ${(q.options || [])
+                .map((opt, oIdx) => {
+                  let btnCls = 'border-line/70 hover:border-pri text-fg';
+                  if (isAnswered) {
+                    if (oIdx === q.answer) {
+                      btnCls = 'border-emerald-500 bg-emerald-500/15 text-emerald-200 font-semibold';
+                    } else if (oIdx === picked && !isCorrect) {
+                      btnCls = 'border-rose-500 bg-rose-500/15 text-rose-200';
+                    } else {
+                      btnCls = 'border-line/40 opacity-75';
+                    }
+                  }
+                  return `
+                    <button
+                      type="button"
+                      data-vstep-q="${qIdx}"
+                      data-vstep-opt="${oIdx}"
+                      class="w-full text-left p-3 rounded-xl border text-xs sm:text-sm transition flex items-start gap-2 cursor-pointer ${btnCls}"
+                    >
+                      <span>${esc(opt)}</span>
+                    </button>
+                  `;
+                })
+                .join('')}
+            </div>
+
+            ${
+              isAnswered
+                ? `
+              <div class="p-3.5 rounded-xl border ${
+                isCorrect
+                  ? 'bg-emerald-500/10 border-emerald-500/40'
+                  : 'bg-amber-500/10 border-amber-500/40'
+              } text-xs space-y-1.5 leading-relaxed">
+                <div class="font-bold ${isCorrect ? 'text-emerald-400' : 'text-amber-300'}">
+                  ${
+                    isCorrect
+                      ? '✓ Chính xác! Bạn đã nắm bắt đúng thông tin bài nghe.'
+                      : '✗ Chưa chính xác — Hãy xem dịch nghĩa & phân tích đáp án chuẩn VSTEP:'
+                  }
+                </div>
+                ${
+                  q.questionVi
+                    ? `<div class="text-fg"><b>🇻🇳 Dịch câu hỏi:</b> ${esc(q.questionVi)}</div>`
+                    : ''
+                }
+                <div class="text-mute"><b>💡 Giải thích đáp án:</b> ${esc(q.explain || '')}</div>
+              </div>
+            `
+                : ''
+            }
+          </div>
+        `;
+      })
+      .join('');
+
     return `
       <div class="space-y-4">
         <!-- THANH CÔNG CỤ STUDIO TRÊN ĐỈNH: CHỌN BÀI HỌC + 3 CHẾ ĐỘ (SHADOWING | DICTATION | NGHE VSTEP) -->
         <div class="card p-3.5 sm:p-4 space-y-3">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <!-- Bên trái: Chọn bài học & Nút Thêm bài từ YouTube / ELLLO -->
+            <!-- Bên trái: Chọn bài học từ Kho listening-lessons-data.js -->
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-xs font-mono font-bold text-pink-400">🎙️ Talk Studio (${lv})</span>
-              <select id="studio-lesson-select" class="inp !w-auto !py-1.5 !px-3 !text-xs font-semibold max-w-[260px] sm:max-w-[360px]">
+              <select id="studio-lesson-select" class="inp !w-auto !py-1.5 !px-3 !text-xs font-semibold max-w-[280px] sm:max-w-[420px]">
                 ${list
                   .map(
                     (it, idx) =>
                       `<option value="${idx}" ${idx === curLessonIdx ? 'selected' : ''}>${
                         idx + 1
-                      }. ${esc(it.title)} (${it.segments.length} câu)</option>`
+                      }. ${esc(it.title)} (${it.segments.length} câu${
+                        it.youtubeId ? ' · 🎬 Video thật' : ''
+                      })</option>`
                   )
                   .join('')}
               </select>
-              <button
-                type="button"
-                id="studio-open-import-modal"
-                class="btn !py-1.5 !px-2.5 !text-xs border-pink-500/40 text-pink-400 hover:bg-pink-500/10 whitespace-nowrap"
-                title="Dán link YouTube, ELLLO.org hoặc hội thoại bất kỳ để tạo bài luyện mới"
-              >
-                + Thêm bài (YouTube / ELLLO)
-              </button>
             </div>
 
-            <!-- Bên phải: Bộ chuyển đổi 3 Chế độ giống thanh đỉnh Senglish -->
+            <!-- Bên phải: Bộ chuyển đổi 3 Chế độ -->
             <div class="flex items-center gap-1 inset p-1 rounded-xl">
               <button
                 type="button"
@@ -1005,7 +1131,7 @@
                     : 'text-mute hover:text-fg'
                 }"
               >
-                🎧 Nghe VSTEP
+                🎧 Nghe VSTEP (${vstepQuestions.length})
               </button>
             </div>
           </div>
@@ -1022,60 +1148,59 @@
                 lesson.sourceLabel || lesson.category
               )}</span>
               <div class="flex items-center gap-1 inset p-1 rounded-lg shrink-0">
-                <button
-                  type="button"
-                  data-studio-media="video"
-                  class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
-                    mediaTab === 'video'
-                      ? 'bg-pri/20 text-pri border border-pri/40'
-                      : 'text-mute hover:text-fg'
-                  }"
-                >
-                  📺 Video
-                </button>
+                ${
+                  lesson.youtubeId
+                    ? `
+                  <button
+                    type="button"
+                    data-studio-media="video"
+                    class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
+                      mediaTab === 'video'
+                        ? 'bg-pri/20 text-pri border border-pri/40'
+                        : 'text-mute hover:text-fg'
+                    }"
+                  >
+                    📺 Video thật
+                  </button>
+                `
+                    : ''
+                }
                 <button
                   type="button"
                   data-studio-media="audio"
                   class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
-                    mediaTab === 'audio'
+                    mediaTab === 'audio' || !lesson.youtubeId
                       ? 'bg-pri/20 text-pri border border-pri/40'
                       : 'text-mute hover:text-fg'
                   }"
                 >
-                  🔊 Âm thanh
+                  🔊 Âm thanh US
                 </button>
               </div>
             </div>
 
-            <!-- Khung Media Stage (YouTube Embed đồng bộ mốc câu hoặc US Neural Audio Stage) -->
+            <!-- Khung Media Stage (Trình phát YouTube IFrame API đồng bộ chữ chạy hoặc US Neural Audio Stage) -->
             ${
               mediaTab === 'video' && lesson.youtubeId
                 ? `
-              <div class="relative rounded-xl overflow-hidden border border-line bg-black aspect-video">
-                <iframe
-                  id="studio-yt-iframe"
-                  class="w-full h-full"
-                  src="https://www.youtube.com/embed/${esc(
-                    lesson.youtubeId
-                  )}?start=${startSec}&end=${endSec}&autoplay=0&playsinline=1&rel=0"
-                  title="${esc(lesson.title)}"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowfullscreen
-                ></iframe>
-                <div class="absolute bottom-2 left-2 flex flex-wrap items-center gap-1.5">
+              <div class="space-y-2">
+                <div class="relative rounded-xl overflow-hidden border border-line bg-black aspect-video">
+                  <div id="studio-yt-stage" class="w-full h-full"></div>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-1.5">
                   <button
                     type="button"
                     id="studio-jump-first-btn"
-                    class="px-2.5 py-1 rounded-lg bg-black/80 border border-white/20 text-white text-[11px] font-semibold hover:bg-black whitespace-nowrap"
+                    class="px-2.5 py-1.5 rounded-lg border border-line bg-inset text-fg text-[11px] font-semibold hover:border-pri whitespace-nowrap cursor-pointer"
                   >
-                    ⏮ Đi đến câu đầu
+                    ⏮ Đi đến câu #1
                   </button>
                   <button
                     type="button"
                     id="studio-play-yt-seg-btn"
-                    class="px-2.5 py-1 rounded-lg bg-pink-600/90 text-white text-[11px] font-bold hover:bg-pink-500 whitespace-nowrap"
+                    class="px-3 py-1.5 rounded-lg bg-pink-600 text-white text-[11px] font-bold hover:bg-pink-500 whitespace-nowrap cursor-pointer shadow"
                   >
-                    ▶ Phát đoạn #${curSegIdx + 1} (${startSec}s–${endSec}s)
+                    ▶ Phát giọng người thật #${curSegIdx + 1} (${startSec}s–${endSec}s)
                   </button>
                 </div>
               </div>
@@ -1112,8 +1237,8 @@
                 ${
                   lesson.youtubeId
                     ? `<div class="text-[11px] text-mute flex items-center justify-between pt-1 border-t border-line/40">
-                         <span>Bài này có sẵn Video hội thoại gốc:</span>
-                         <button type="button" data-studio-media="video" class="text-pink-400 font-semibold hover:underline">Mở khung Video YouTube →</button>
+                         <span>Bài này có sẵn Video người thật:</span>
+                         <button type="button" data-studio-media="video" class="text-pink-400 font-semibold hover:underline">Mở Video YouTube gốc →</button>
                        </div>`
                     : ''
                 }
@@ -1156,7 +1281,7 @@
                 </label>
               </div>
 
-              <!-- Dòng Tiến độ & Độ chính xác giống video Senglish -->
+              <!-- Dòng Tiến độ & Độ chính xác -->
               <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div class="flex items-center gap-2">
                   <span class="font-mono tabular-nums font-bold text-fg">${stats.doneCount}/${
@@ -1212,6 +1337,13 @@
                             <span class="text-[10px] font-mono text-mute">${seg.start || 0}s–${
                       seg.end || 6
                     }s</span>
+                            ${
+                              seg.speaker
+                                ? `<span class="text-[10px] font-semibold text-sky-400/90">· ${esc(
+                                    seg.speaker
+                                  )}</span>`
+                                : ''
+                            }
                           </div>
                           ${
                             segRec
@@ -1230,6 +1362,11 @@
                         }">
                           ${esc(seg.text)}
                         </p>
+                        ${
+                          showLeftSubs && showTrans && seg.vi
+                            ? `<p class="text-[11px] text-emerald-400/80 mt-1">${esc(seg.vi)}</p>`
+                            : ''
+                        }
                       </div>
                     `;
                   })
@@ -1247,7 +1384,7 @@
                 <div class="pt-2 border-t border-line/50">
                   <b class="text-pri">🎯 Mẹo thi VSTEP Listening & Speaking:</b>
                   <p class="text-mute mt-0.5">
-                    Hãy nghe câu mẫu bằng nút <b>🔊 Nghe US</b> trước, chạm vào từ mới bất kỳ trên câu để xem nghĩa và lưu vào Kho từ vựng, sau đó bấm <b>🎙️ Ghi âm</b> để kiểm tra độ khớp từng từ.
+                    Bấm vào từng câu bên trái hoặc nút <b>▶</b> để nghe giọng người thật trong Video kèm chữ chạy sáng theo thời gian thực, chạm vào từ bất kỳ để tra nghĩa, sau đó bấm <b>🎙️ Ghi âm</b> để chấm độ khớp từng từ.
                   </p>
                 </div>
               </div>
@@ -1259,7 +1396,7 @@
           <div class="lg:col-span-7 space-y-4">
             <div class="card p-4 sm:p-5 space-y-4">
               
-              <!-- Thanh điều khiển trên cùng của Cột Phải: #1 | 18 từ | Ghép câu kế tiếp (1/2) | IPA | Dịch nghĩa | Nghe US | Tách cụm -->
+              <!-- Thanh điều khiển trên cùng của Cột Phải: #1 | N từ | Ghép câu kế tiếp (1/2) | IPA | Dịch nghĩa | Nghe US | Tách cụm -->
               <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-3">
                 <div class="flex flex-wrap items-center gap-1.5">
                   <span class="px-2.5 py-1 rounded-lg bg-pink-500/20 border border-pink-500/40 text-pink-300 font-mono text-xs font-bold">
@@ -1268,6 +1405,7 @@
                   <span class="px-2 py-1 rounded-lg bg-inset text-mute font-mono text-xs tabular-nums">
                     ${wordsArr.length} từ
                   </span>
+                  <span id="studio-live-sync-badge" class="hidden px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[11px] font-bold"></span>
                   ${
                     curSegIdx < segs.length - 1
                       ? `
@@ -1315,7 +1453,7 @@
                     type="button"
                     id="studio-speak-us-btn"
                     class="px-3 py-1 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-300 text-xs font-bold hover:bg-sky-500/20 whitespace-nowrap"
-                    title="Nghe nguyên câu liền mạch chuẩn US"
+                    title="Nghe câu chuẩn giọng Mỹ (US)"
                   >
                     🔊 Nghe US
                   </button>
@@ -1330,7 +1468,7 @@
                 </div>
               </div>
 
-              <!-- VÙNG HIỂN THỊ CÂU MẪU + PHIÊN ÂM IPA DƯỚI TỪNG TỪ (CHẠM TỪ ĐỂ TRA NGHĨA) -->
+              <!-- VÙNG HIỂN THỊ CÂU MẪU + PHIÊN ÂM IPA DƯỚI TỪNG TỪ + BẢN DỊCH TIẾNG VIỆT TRỌN CÂU -->
               <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
                 <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2 leading-relaxed ${
                   studioMode === 'dictation' && !showLeftSubs ? 'blur-md select-none' : ''
@@ -1339,17 +1477,17 @@
                 </div>
 
                 ${
-                  showTrans
+                  showTrans && combinedVi
                     ? `
-                  <div class="pt-2.5 border-t border-line/50 text-xs sm:text-sm text-emerald-400/90 font-medium">
-                    🇻🇳 ${esc(combinedVi)}
+                  <div class="pt-2.5 border-t border-line/50 text-xs sm:text-sm text-emerald-400 font-medium leading-relaxed">
+                    🇻🇳 <b>Dịch câu:</b> ${esc(combinedVi)}
                   </div>
                 `
                     : ''
                 }
 
                 <div class="flex items-center justify-between text-[11px] text-mute pt-1">
-                  <span>📖 Nhấn vào bất kỳ từ nào ở trên để tra nghĩa, nghe phát âm & lưu vào Kho từ vựng</span>
+                  <span>📖 Chạm vào từ bất kỳ để tra nghĩa & lưu Kho từ · Khi phát Video/Audio các từ sẽ tự sáng theo thời gian thực</span>
                 </div>
               </div>
 
@@ -1428,7 +1566,7 @@
                     </div>
                   </div>
 
-                  <!-- Ô nhập nhanh bằng Mic bàn phím iPad (Dự phòng tiện lợi khi không muốn bật quyền Micro trình duyệt) -->
+                  <!-- Ô nhập nhanh bằng Mic bàn phím iPad -->
                   <div class="flex items-center gap-2">
                     <input
                       id="studio-manual-speech-in"
@@ -1510,7 +1648,7 @@
                     }
                   </div>
 
-                  <!-- KHUNG AI HUẤN LUYỆN PHÁT ÂM (4 MỤC NHƯ VIDEO SENGLISH) -->
+                  <!-- KHUNG AI HUẤN LUYỆN PHÁT ÂM (4 MỤC) -->
                   <div
                     id="studio-ai-coach-box"
                     class="${
@@ -1547,7 +1685,7 @@
                     id="studio-dict-input"
                     rows="2"
                     class="inp text-sm font-mono"
-                    placeholder="Bấm '🔊 Nghe US' hoặc 'Tách cụm' rồi gõ lại chính xác những gì bạn nghe được..."
+                    placeholder="Bấm nút ▶ (giọng người thật) hoặc '🔊 Nghe US' rồi gõ lại chính xác những gì bạn nghe được..."
                   >${esc(savedDictation)}</textarea>
                   <div id="studio-dict-feedback" class="text-xs leading-relaxed">
                     ${
@@ -1570,38 +1708,16 @@
                 </div>
               `
                   : `
-                <!-- CHẾ ĐỘ 3: NGHE HIỂU & GIẢI BẪY ĐỀ THI VSTEP + PHẢN XẠ SPEAKING -->
-                <div class="space-y-3">
-                  ${
-                    lesson.mcq
-                      ? `
-                    <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
-                      <div class="flex items-center justify-between gap-2">
-                        <b class="text-xs text-warn uppercase">🎧 Câu hỏi Nghe hiểu VSTEP (${lv})</b>
-                        <span class="text-[11px] text-mute">Bấm chọn đáp án đúng</span>
-                      </div>
-                      <p class="text-sm font-semibold text-fg">${esc(lesson.mcq.question)}</p>
-                      <div class="space-y-2">
-                        ${lesson.mcq.options
-                          .map(
-                            (opt, oIdx) => `
-                          <button
-                            type="button"
-                            data-studio-mcq="${oIdx}"
-                            class="w-full text-left p-3 rounded-xl border border-line/70 hover:border-pri text-xs sm:text-sm transition flex items-start gap-2"
-                          >
-                            <b class="font-mono text-pri">${String.fromCharCode(65 + oIdx)}.</b>
-                            <span>${esc(opt)}</span>
-                          </button>
-                        `
-                          )
-                          .join('')}
-                      </div>
-                      <div id="studio-mcq-explain" class="hidden p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 text-xs space-y-1"></div>
-                    </div>
-                  `
-                      : ''
-                  }
+                <!-- CHẾ ĐỘ 3: BỘ 3-4 CÂU HỎI TRẮC NGHIỆM TIẾNG ANH CHUẨN VSTEP LISTENING + GIẢI THÍCH ĐÁP ÁN -->
+                <div class="space-y-3.5">
+                  <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+                    <b class="text-xs sm:text-sm text-amber-300 uppercase">🎧 VSTEP Listening Comprehension (${
+                      vstepQuestions.length
+                    } Questions in English)</b>
+                    <span class="text-[11px] text-mute">Chọn đáp án A/B/C/D để xem dịch câu hỏi & giải thích chi tiết</span>
+                  </div>
+
+                  ${vstepQuestionsHTML}
 
                   ${
                     lesson.speakingPrompt
@@ -1618,14 +1734,14 @@
               `
               }
 
-              <!-- THANH ĐIỀU KHIỂN ĐÁY: CHỈNH TỐC ĐỘ (0.5x - 1.5x) & CHUYỂN CÂU (GIỐNG ĐÁY VIDEO SENGLISH) -->
+              <!-- THANH ĐIỀU KHIỂN ĐÁY: PHÁT CÂU HIỆN TẠI + CHỈNH TỐC ĐỘ (0.5x - 1.5x) & CHUYỂN CÂU -->
               <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line/60">
                 <div class="flex flex-wrap items-center gap-1">
                   <button
                     type="button"
                     id="studio-bottom-play-btn"
                     class="w-9 h-9 rounded-xl bg-pink-500 text-white font-bold flex items-center justify-center hover:bg-pink-600 transition cursor-pointer mr-1"
-                    title="Phát câu hiện tại (US)"
+                    title="Phát câu hiện tại (Ưu tiên giọng người thật từ Video YouTube kèm chữ chạy sáng thời gian thực)"
                   >
                     ▶
                   </button>
@@ -1671,37 +1787,6 @@
           </div>
 
         </div>
-
-        <!-- MODAL THÊM BÀI HỌC MỚI TỪ YOUTUBE / ELLLO.ORG / VĂN BẢN -->
-        <div id="studio-import-modal" class="hidden fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-          <div class="card max-w-lg w-full p-5 space-y-3.5 max-h-[90vh] overflow-y-auto">
-            <div class="flex items-center justify-between border-b border-line pb-2.5">
-              <b class="text-base">➕ Thêm bài luyện từ YouTube / ELLLO.org</b>
-              <button type="button" id="studio-close-import-modal" class="btn !py-1 !px-2.5 !text-xs">Đóng</button>
-            </div>
-            <div class="space-y-2.5 text-xs">
-              <div>
-                <label class="font-bold text-mute block mb-1">Tiêu đề bài học:</label>
-                <input id="imp-title" type="text" class="inp text-xs" placeholder="VD: ELLLO #388 Daily Routine / Hội thoại Khám tim mạch..." />
-              </div>
-              <div>
-                <label class="font-bold text-mute block mb-1">Link hoặc ID Video YouTube (Tùy chọn):</label>
-                <input id="imp-yt" type="text" class="inp text-xs font-mono" placeholder="VD: https://www.youtube.com/watch?v=zN6V2M3bE8M" />
-              </div>
-              <div>
-                <label class="font-bold text-mute block mb-1">Nội dung các câu tiếng Anh (Mỗi câu 1 dòng hoặc đoạn văn bất kỳ):</label>
-                <textarea id="imp-script" rows="5" class="inp text-xs font-mono" placeholder="Easy English conversations.&#10;How often do you go swimming?&#10;I usually go swimming twice a week."></textarea>
-              </div>
-              <div>
-                <label class="font-bold text-mute block mb-1">Bản dịch tiếng Việt tương ứng (Tùy chọn, mỗi câu 1 dòng):</label>
-                <textarea id="imp-vi" rows="3" class="inp text-xs" placeholder="Hội thoại tiếng Anh dễ hiểu.&#10;Bạn có thường đi bơi không?"></textarea>
-              </div>
-            </div>
-            <div class="flex justify-end gap-2 pt-2 border-t border-line">
-              <button type="button" id="studio-save-import-btn" class="btn btn-pri font-bold !text-xs">Lưu & Bắt đầu luyện tập</button>
-            </div>
-          </div>
-        </div>
       </div>
     `;
   }
@@ -1729,17 +1814,36 @@
   function bind(container, lv, state) {
     const esc = global.LexiAcademy.esc;
     const ctx = getActiveLessonAndSegment(lv);
-    const { list, lesson, segs, combinedText, recKey } = ctx;
+    const { lesson, segs, combinedText, startSec, endSec, recKey } = ctx;
+    const wordsCount = combinedText.split(/\s+/).filter(Boolean).length;
+
+    // Gắn hoặc cập nhật trình phát YouTube IFrame API nếu đang ở tab Video và bài học có youtubeId
+    if (mediaTab === 'video' && lesson.youtubeId) {
+      mountOrUpdateYouTubePlayer(lesson.youtubeId, startSec, endSec);
+    }
+
+    // Hàm phát câu thông minh: Ưu tiên phát giọng người thật từ Video YouTube (nếu đang mở tab Video), ngược lại phát US Neural
+    const playActiveSegmentPreferredVoice = () => {
+      if (mediaTab === 'video' && lesson.youtubeId) {
+        const ok = playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, combinedText);
+        if (ok) return;
+      }
+      playSentenceUSWithKaraoke(combinedText, wordsCount);
+    };
 
     // 1. Chọn bài học
     const lessonSelect = container.querySelector('#studio-lesson-select');
     if (lessonSelect) {
       lessonSelect.onchange = () => {
         stopActiveRecording();
+        clearKaraokeTimer();
         curLessonIdx = Number(lessonSelect.value) || 0;
         curSegIdx = 0;
         mergeNext = false;
         activePopoverWord = null;
+        const nextList = getLessonsForLevel(lv);
+        const nextLesson = nextList[curLessonIdx];
+        mediaTab = nextLesson && nextLesson.youtubeId ? 'video' : 'audio';
         global.LexiAcademy.render();
       };
     }
@@ -1753,10 +1857,16 @@
       };
     });
 
-    // 3. Chuyển đổi Video / Âm thanh ở cột trái
+    // 3. Chuyển đổi Video thật / Âm thanh US ở cột trái
     container.querySelectorAll('[data-studio-media]').forEach((btn) => {
       btn.onclick = () => {
+        clearKaraokeTimer();
         mediaTab = btn.getAttribute('data-studio-media') || 'audio';
+        if (mediaTab === 'audio' && ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
+          try {
+            ytPlayer.pauseVideo();
+          } catch (e) {}
+        }
         global.LexiAcademy.render();
       };
     });
@@ -1784,16 +1894,25 @@
       };
     }
 
-    // 6. Bấm chọn câu #1, #2, #3... ở cột trái
+    // 6. Bấm chọn câu #1, #2, #3... ở cột trái -> Phát ngay giọng người thật trong Video (hoặc US Audio) + chạy chữ Karaoke
     container.querySelectorAll('[data-studio-seg]').forEach((card) => {
       card.onclick = () => {
         stopActiveRecording();
+        clearKaraokeTimer();
         curSegIdx = Number(card.getAttribute('data-studio-seg')) || 0;
         activePopoverWord = null;
         global.LexiAcademy.render();
         const nextCtx = getActiveLessonAndSegment(lv);
-        if (typeof global.speakUS === 'function') {
-          global.speakUS(nextCtx.combinedText);
+        const nextWordsCount = nextCtx.combinedText.split(/\s+/).filter(Boolean).length;
+        if (mediaTab === 'video' && nextCtx.lesson.youtubeId) {
+          playYouTubeSegmentHumanVoice(
+            nextCtx.startSec,
+            nextCtx.endSec,
+            nextWordsCount,
+            nextCtx.combinedText
+          );
+        } else {
+          playSentenceUSWithKaraoke(nextCtx.combinedText, nextWordsCount);
         }
       };
     });
@@ -1803,49 +1922,44 @@
     if (jumpFirstBtn) {
       jumpFirstBtn.onclick = () => {
         stopActiveRecording();
+        clearKaraokeTimer();
         curSegIdx = 0;
         activePopoverWord = null;
         global.LexiAcademy.render();
         const firstCtx = getActiveLessonAndSegment(lv);
-        if (typeof global.speakUS === 'function') {
-          global.speakUS(firstCtx.combinedText);
+        const firstWordsCount = firstCtx.combinedText.split(/\s+/).filter(Boolean).length;
+        if (mediaTab === 'video' && firstCtx.lesson.youtubeId) {
+          playYouTubeSegmentHumanVoice(
+            firstCtx.startSec,
+            firstCtx.endSec,
+            firstWordsCount,
+            firstCtx.combinedText
+          );
+        } else {
+          playSentenceUSWithKaraoke(firstCtx.combinedText, firstWordsCount);
         }
       };
     }
 
-    const playCurrentSentenceUS = () => {
-      if (typeof global.setAudioPlaybackRate === 'function') {
-        global.setAudioPlaybackRate(playbackSpeed);
-      }
-      if (typeof global.speakUS === 'function') {
-        global.speakUS(combinedText, {
-          onComplete: () => {
-            if (loopSegment) {
-              setTimeout(() => {
-                if (loopSegment) playCurrentSentenceUS();
-              }, 700);
-            }
-          }
-        });
-      }
-    };
-
     const leftPlayUsBtn = container.querySelector('#studio-left-play-us');
-    if (leftPlayUsBtn) leftPlayUsBtn.onclick = playCurrentSentenceUS;
+    if (leftPlayUsBtn) {
+      leftPlayUsBtn.onclick = () => playSentenceUSWithKaraoke(combinedText, wordsCount);
+    }
 
     const speakUsBtn = container.querySelector('#studio-speak-us-btn');
-    if (speakUsBtn) speakUsBtn.onclick = playCurrentSentenceUS;
+    if (speakUsBtn) {
+      speakUsBtn.onclick = () => playSentenceUSWithKaraoke(combinedText, wordsCount);
+    }
 
     const bottomPlayBtn = container.querySelector('#studio-bottom-play-btn');
-    if (bottomPlayBtn) bottomPlayBtn.onclick = playCurrentSentenceUS;
+    if (bottomPlayBtn) {
+      bottomPlayBtn.onclick = playActiveSegmentPreferredVoice;
+    }
 
     const playYtSegBtn = container.querySelector('#studio-play-yt-seg-btn');
     if (playYtSegBtn) {
       playYtSegBtn.onclick = () => {
-        const iframe = container.querySelector('#studio-yt-iframe');
-        if (iframe && lesson.youtubeId) {
-          iframe.src = `https://www.youtube.com/embed/${lesson.youtubeId}?start=${ctx.startSec}&end=${ctx.endSec}&autoplay=1&playsinline=1&rel=0`;
-        }
+        playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, combinedText);
       };
     }
 
@@ -1854,6 +1968,7 @@
     if (mergeNextBtn) {
       mergeNextBtn.onclick = () => {
         stopActiveRecording();
+        clearKaraokeTimer();
         mergeNext = !mergeNext;
         activePopoverWord = null;
         global.LexiAcademy.render();
@@ -2097,8 +2212,14 @@
           return;
         }
 
+        clearKaraokeTimer();
         if (typeof global.stopAudioPlayback === 'function') {
           global.stopAudioPlayback();
+        }
+        if (ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
+          try {
+            ytPlayer.pauseVideo();
+          } catch (e) {}
         }
 
         liveTranscript = '';
@@ -2106,7 +2227,6 @@
         recordedChunks = [];
         let createdAudioUrl = '';
 
-        // 1. Khởi tạo MediaRecorder để thu lại giọng thật của người học phát lại được
         let stream = null;
         if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
           try {
@@ -2130,12 +2250,9 @@
               };
               mediaRecorder.start();
             }
-          } catch (err) {
-            // Tiếp tục với SpeechRecognition nếu người dùng chưa cấp quyền MediaRecorder
-          }
+          } catch (err) {}
         }
 
-        // 2. Khởi tạo SpeechRecognition nhận diện từng từ tiếng Anh
         const SR = global.SpeechRecognition || global.webkitSpeechRecognition;
         if (SR) {
           try {
@@ -2221,7 +2338,6 @@
         curRec.showCoach = true;
         aiCoachBox.classList.remove('hidden');
 
-        // Nếu có kết nối AI trực tuyến, bổ sung thêm lời khuyên phát âm chuyên sâu
         const aiFn =
           typeof global.ai === 'function'
             ? global.ai
@@ -2311,35 +2427,44 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
       };
     }
 
-    // 13. Chế độ Nghe VSTEP (MCQ)
-    const mcqExplain = container.querySelector('#studio-mcq-explain');
-    container.querySelectorAll('[data-studio-mcq]').forEach((btn) => {
+    // 13. Chế độ Nghe VSTEP (Bộ 3-4 câu hỏi Trắc nghiệm Tiếng Anh + Nghe câu bằng chứng)
+    container.querySelectorAll('[data-vstep-q]').forEach((btn) => {
       btn.onclick = () => {
-        if (!lesson.mcq) return;
-        const picked = Number(btn.getAttribute('data-studio-mcq'));
-        const isCorrect = picked === lesson.mcq.answer;
+        const qIdx = Number(btn.getAttribute('data-vstep-q'));
+        const optIdx = Number(btn.getAttribute('data-vstep-opt'));
+        const ansKey = `${lesson.id}_${qIdx}`;
+        vstepAnswersStore[ansKey] = optIdx;
 
-        container.querySelectorAll('[data-studio-mcq]').forEach((b, idx) => {
-          b.classList.remove('border-emerald-500', 'bg-emerald-500/15', 'border-rose-500', 'bg-rose-500/15');
-          if (idx === lesson.mcq.answer) {
-            b.classList.add('border-emerald-500', 'bg-emerald-500/15');
-          } else if (idx === picked && !isCorrect) {
-            b.classList.add('border-rose-500', 'bg-rose-500/15');
-          }
-        });
-
-        if (mcqExplain) {
-          mcqExplain.classList.remove('hidden');
-          mcqExplain.innerHTML = `
-            <div class="font-bold ${isCorrect ? 'text-emerald-400' : 'text-amber-300'}">
-              ${isCorrect ? '✓ Chính xác!' : '✗ Chưa chính xác — Hãy xem giải thích bẫy VSTEP:'}
-            </div>
-            <div>${esc(lesson.mcq.explain)}</div>
-          `;
-        }
-
-        if (isCorrect) {
+        const qList = lesson.vstepQuestions || [];
+        const allCorrect =
+          qList.length > 0 &&
+          qList.every((q, idx) => vstepAnswersStore[`${lesson.id}_${idx}`] === q.answer);
+        if (allCorrect) {
           global.LexiAcademy.markDone(lesson.id);
+        }
+        global.LexiAcademy.render();
+      };
+    });
+
+    container.querySelectorAll('[data-vstep-jump-seg]').forEach((btn) => {
+      btn.onclick = () => {
+        const targetIdx = Number(btn.getAttribute('data-vstep-jump-seg')) || 0;
+        stopActiveRecording();
+        clearKaraokeTimer();
+        curSegIdx = Math.max(0, Math.min(segs.length - 1, targetIdx));
+        activePopoverWord = null;
+        global.LexiAcademy.render();
+        const evCtx = getActiveLessonAndSegment(lv);
+        const evWordsCount = evCtx.combinedText.split(/\s+/).filter(Boolean).length;
+        if (mediaTab === 'video' && evCtx.lesson.youtubeId) {
+          playYouTubeSegmentHumanVoice(
+            evCtx.startSec,
+            evCtx.endSec,
+            evWordsCount,
+            evCtx.combinedText
+          );
+        } else {
+          playSentenceUSWithKaraoke(evCtx.combinedText, evWordsCount);
         }
       };
     });
@@ -2351,7 +2476,12 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
         if (typeof global.setAudioPlaybackRate === 'function') {
           global.setAudioPlaybackRate(playbackSpeed);
         }
-        global.LexiAcademy.notify(`Đã chỉnh tốc độ phát âm: ${playbackSpeed}x`);
+        if (ytPlayer && ytPlayerReady && typeof ytPlayer.setPlaybackRate === 'function') {
+          try {
+            ytPlayer.setPlaybackRate(playbackSpeed);
+          } catch (e) {}
+        }
+        global.LexiAcademy.notify(`Đã chỉnh tốc độ phát: ${playbackSpeed}x`);
         global.LexiAcademy.render();
       };
     });
@@ -2362,6 +2492,7 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
       prevSegBtn.onclick = () => {
         if (curSegIdx > 0) {
           stopActiveRecording();
+          clearKaraokeTimer();
           curSegIdx--;
           activePopoverWord = null;
           global.LexiAcademy.render();
@@ -2371,6 +2502,7 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
     if (nextSegBtn) {
       nextSegBtn.onclick = () => {
         stopActiveRecording();
+        clearKaraokeTimer();
         activePopoverWord = null;
         const step = mergeNext ? 2 : 1;
         if (curSegIdx + step < segs.length) {
@@ -2383,89 +2515,13 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
         }
       };
     }
-
-    // 15. Modal Thêm bài học mới từ YouTube / ELLLO.org
-    const importModal = container.querySelector('#studio-import-modal');
-    const openImportBtn = container.querySelector('#studio-open-import-modal');
-    const closeImportBtn = container.querySelector('#studio-close-import-modal');
-    const saveImportBtn = container.querySelector('#studio-save-import-btn');
-
-    if (openImportBtn && importModal) {
-      openImportBtn.onclick = () => importModal.classList.remove('hidden');
-    }
-    if (closeImportBtn && importModal) {
-      closeImportBtn.onclick = () => importModal.classList.add('hidden');
-    }
-    if (saveImportBtn && importModal) {
-      saveImportBtn.onclick = () => {
-        const titleIn = container.querySelector('#imp-title');
-        const ytIn = container.querySelector('#imp-yt');
-        const scriptIn = container.querySelector('#imp-script');
-        const viIn = container.querySelector('#imp-vi');
-
-        const title = titleIn && titleIn.value.trim() ? titleIn.value.trim() : 'Bài luyện YouTube / ELLLO tự chọn';
-        const rawYt = ytIn ? ytIn.value.trim() : '';
-        const rawScript = scriptIn ? scriptIn.value.trim() : '';
-        const rawVi = viIn ? viIn.value.trim() : '';
-
-        if (!rawScript) {
-          global.LexiAcademy.notify('Hãy dán ít nhất 1 câu tiếng Anh vào ô Nội dung kịch bản.');
-          return;
-        }
-
-        // Bóc tách YouTube Video ID nếu người dùng dán URL đầy đủ
-        let ytId = '';
-        if (rawYt) {
-          const m = rawYt.match(/(?:v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/);
-          ytId = m ? m[1] : rawYt.length === 11 ? rawYt : '';
-        }
-
-        const enLines = rawScript
-          .split(/\n+|(?<=[.!?])\s+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const viLines = rawVi
-          .split(/\n+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-
-        const newSegments = enLines.map((line, idx) => ({
-          text: line,
-          vi: viLines[idx] || 'Chạm vào từng từ để tra nghĩa chi tiết.',
-          start: idx * 7,
-          end: (idx + 1) * 7,
-          ipaNote: 'Bấm "🔊 Nghe US" hoặc "Tách cụm" để luyện nhịp điệu chuẩn Mỹ.'
-        }));
-
-        const customList = getCustomLessons();
-        const newLesson = {
-          id: 'custom_' + Date.now(),
-          level: lv,
-          category: ytId ? 'YouTube Custom Lesson' : 'ELLLO / Custom Dialogue',
-          title,
-          youtubeId: ytId,
-          sourceLabel: ytId ? 'YouTube Video + US Neural' : 'Custom Studio Lesson',
-          segments: newSegments
-        };
-        customList.push(newLesson);
-        saveCustomLessons(customList);
-
-        const updatedList = getLessonsForLevel(lv);
-        curLessonIdx = updatedList.length - 1;
-        curSegIdx = 0;
-        if (ytId) mediaTab = 'video';
-        importModal.classList.add('hidden');
-        global.LexiAcademy.notify('✓ Đã thêm bài học mới thành công!');
-        global.LexiAcademy.render();
-      };
-    }
   }
 
   function getItems(lv) {
     return getLessonsForLevel(lv);
   }
 
-  // Экспорт hàm dùng chung để module Speaking cũng dùng được bộ chấm thẻ Xanh/Vàng/Đỏ & IPA
+  // Xuất hàm dùng chung để module Speaking cũng dùng được bộ chấm thẻ Xanh/Vàng/Đỏ & IPA
   global.LexiStudioHelpers = {
     lookupWordInfo,
     cleanWordToken,
