@@ -2086,9 +2086,17 @@
       if (tState.sentences[idx] && tState.sentences[idx].passed) passedCount++;
     });
 
+    const ensureSentencePunct = (s) => {
+      const trimmed = String(s || '').trim();
+      if (!trimmed) return '';
+      return /[.!?;:]$/.test(trimmed) ? trimmed : trimmed + '.';
+    };
+
     const assembledEssay = item.sentences
       .map((_, idx) =>
-        tState.sentences[idx] && tState.sentences[idx].text ? tState.sentences[idx].text.trim() : ''
+        tState.sentences[idx] && tState.sentences[idx].text
+          ? ensureSentencePunct(tState.sentences[idx].text)
+          : ''
       )
       .filter(Boolean)
       .join(' ');
@@ -2280,11 +2288,11 @@
                     <button type="button" id="wrt-eval-sent-btn" class="btn btn-pri font-bold !py-2 !px-4 whitespace-nowrap">
                       Đánh giá & Sửa lỗi câu ${curSentIdx + 1}
                     </button>
-                    <button type="button" id="wrt-speak-sent-btn" class="btn !py-2 !px-3 !text-xs font-bold border-sky-500/40 text-sky-400 hover:bg-sky-500/10 whitespace-nowrap" title="Nghe giọng chuẩn US lưu loát (Chunking 0s delay)">
+                    <button type="button" id="wrt-speak-sent-btn" class="btn !py-2 !px-3 !text-xs font-bold border-sky-500/40 text-sky-400 hover:bg-sky-500/10 whitespace-nowrap" title="Nghe cả câu liền mạch chuẩn US">
                       🔊 Nghe US
                     </button>
-                    <button type="button" id="wrt-shadow-sent-btn" class="btn !py-2 !px-3 !text-xs font-bold border-amber-500/40 text-amber-400 hover:bg-amber-500/10 whitespace-nowrap" title="Tách cụm nhịp thở & dừng 1.5s sau mỗi cụm để nhại theo">
-                      🎯 Shadowing (Tách cụm)
+                    <button type="button" id="wrt-shadow-sent-btn" class="btn !py-2 !px-3 !text-xs font-bold border-amber-500/40 text-amber-400 hover:bg-amber-500/10 whitespace-nowrap" title="Ẩn/hiện khung Tách cụm">
+                      Tách cụm
                     </button>
                   </div>
 
@@ -2301,19 +2309,16 @@
                   </button>
                 </div>
 
-                <!-- KHUNG SHADOWING TÁCH CỤM NHỊP THỞ (BREATH-GROUP CHUNKING & 1.5S PAUSING) -->
+                <!-- KHUNG TÁCH CỤM (2 CHẾ ĐỘ: ĐỌC CẢ CÂU DỪNG 1.5S GIỮA CÁC CỤM HOẶC CHỌN CỤM ĐỂ NGHE) -->
                 <div id="wrt-shadow-box" class="hidden inset p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5 text-xs">
                   <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-2">
                     <div class="flex items-center gap-2">
-                      <b class="text-amber-400">🎯 Luyện Shadowing theo cụm nhịp thở (Chuẩn US)</b>
+                      <b class="text-amber-400">Tách cụm theo nhịp thở (Chuẩn US)</b>
                       <span id="wrt-shadow-status" class="font-mono text-[11px] text-mute"></span>
                     </div>
                     <div class="flex flex-wrap items-center gap-1.5">
                       <button type="button" id="wrt-shadow-play-all" class="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold hover:bg-amber-500/30 whitespace-nowrap">
-                        ▶ Đọc lần lượt (Dừng 1.5s mỗi cụm)
-                      </button>
-                      <button type="button" id="wrt-shadow-play-fluent" class="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-300 font-semibold hover:bg-sky-500/25 whitespace-nowrap">
-                        🔊 Đọc liền mạch (0s)
+                        ▶ Đọc cả câu (Dừng 1.5s giữa các cụm)
                       </button>
                       <button type="button" id="wrt-shadow-stop" class="px-2 py-1 rounded-lg border border-line text-mute hover:text-fg whitespace-nowrap">
                         ⏹ Dừng
@@ -2321,7 +2326,7 @@
                     </div>
                   </div>
                   <div class="text-[11px] text-mute">
-                    Bấm vào bất kỳ cụm nào bên dưới để nghe riêng cụm đó (US), hoặc bấm <b>▶ Đọc lần lượt</b> để máy đọc từng cụm và dừng <b>1.5 giây</b> cho bạn nhại theo:
+                    Chọn <b>▶ Đọc cả câu (Dừng 1.5s giữa các cụm)</b> hoặc bấm trực tiếp vào từng cụm bên dưới để nghe riêng cụm đó:
                   </div>
                   <div id="wrt-shadow-chunks" class="flex flex-wrap items-center gap-2 pt-0.5"></div>
                 </div>
@@ -2479,20 +2484,19 @@
       });
     }
 
-    // Nghe phát âm chuẩn US (Chunking 0ms delay) & Luyện Shadowing tách cụm (Dừng 1.5s mỗi cụm)
+    // Nghe phát âm chuẩn US (Nguyên câu liền mạch) & Tách cụm (Ẩn/Hiện khung 2 chế độ)
     const speakSentBtn = container.querySelector('#wrt-speak-sent-btn');
     const shadowSentBtn = container.querySelector('#wrt-shadow-sent-btn');
     const shadowBox = container.querySelector('#wrt-shadow-box');
     const shadowChunksEl = container.querySelector('#wrt-shadow-chunks');
     const shadowStatusEl = container.querySelector('#wrt-shadow-status');
     const shadowPlayAllBtn = container.querySelector('#wrt-shadow-play-all');
-    const shadowPlayFluentBtn = container.querySelector('#wrt-shadow-play-fluent');
     const shadowStopBtn = container.querySelector('#wrt-shadow-stop');
 
     const getAudioTargetText = () => {
       const txt = sentInput ? sentInput.value.trim() : '';
       if (!txt) {
-        global.LexiAcademy.notify('Hãy viết câu tiếng Anh trước khi bấm nghe hoặc luyện Shadowing.');
+        global.LexiAcademy.notify('Hãy viết câu tiếng Anh trước khi bấm nghe hoặc tách cụm.');
         if (sentInput) sentInput.focus();
         return '';
       }
@@ -2559,7 +2563,7 @@
     const createPlaybackCallbacks = (isShadowMode) => ({
       onChunkStart: (idx, total) => {
         resetChunkHighlight();
-        if (shadowChunksEl) {
+        if (shadowChunksEl && isShadowMode) {
           const activeBtn = shadowChunksEl.querySelector(`[data-shadow-chunk-idx="${idx}"]`);
           if (activeBtn) {
             activeBtn.className =
@@ -2567,7 +2571,9 @@
           }
         }
         if (shadowStatusEl) {
-          shadowStatusEl.textContent = `🔊 Đang đọc cụm ${idx + 1}/${total} (US)...`;
+          shadowStatusEl.textContent = isShadowMode
+            ? `🔊 Đang đọc cụm ${idx + 1}/${total} (US)...`
+            : '🔊 Đang đọc nguyên câu (Chuẩn US)...';
         }
       },
       onPauseStart: (idx, total) => {
@@ -2587,7 +2593,7 @@
         resetChunkHighlight();
         if (shadowStatusEl) {
           shadowStatusEl.textContent = isShadowMode
-            ? '✓ Hoàn tất lượt Shadowing (dừng 1.5s mỗi cụm)'
+            ? '✓ Hoàn tất đọc cả câu (dừng 1.5s giữa các cụm)'
             : '✓ Đã đọc xong câu (Chuẩn US liền mạch)';
         }
       }
@@ -2610,12 +2616,23 @@
 
     if (shadowSentBtn && sentInput && shadowBox) {
       shadowSentBtn.onclick = () => {
+        const isCurrentlyHidden = shadowBox.classList.contains('hidden');
+        if (!isCurrentlyHidden) {
+          shadowBox.classList.add('hidden');
+          shadowSentBtn.textContent = 'Tách cụm';
+          if (typeof global.stopAudioPlayback === 'function') {
+            global.stopAudioPlayback();
+          }
+          resetChunkHighlight();
+          return;
+        }
         const txt = getAudioTargetText();
         if (!txt) return;
         shadowBox.classList.remove('hidden');
+        shadowSentBtn.textContent = 'Ẩn tách cụm';
         renderShadowChunks(txt);
-        if (typeof global.speakShadow === 'function') {
-          global.speakShadow(txt, createPlaybackCallbacks(true));
+        if (shadowStatusEl) {
+          shadowStatusEl.textContent = 'Chọn chế độ đọc bên phải hoặc bấm vào cụm bất kỳ để nghe';
         }
       };
     }
@@ -2627,17 +2644,6 @@
         renderShadowChunks(txt);
         if (typeof global.speakShadow === 'function') {
           global.speakShadow(txt, createPlaybackCallbacks(true));
-        }
-      };
-    }
-
-    if (shadowPlayFluentBtn) {
-      shadowPlayFluentBtn.onclick = () => {
-        const txt = getAudioTargetText();
-        if (!txt) return;
-        renderShadowChunks(txt);
-        if (typeof global.speakUS === 'function') {
-          global.speakUS(txt, createPlaybackCallbacks(false));
         }
       };
     }
@@ -2762,13 +2768,21 @@ Hãy nhận xét trực tiếp vào từng từ/cụm từ học viên đã vi�
       };
     }
 
+    const ensureSentenceEndPunct = (s) => {
+      const trimmed = String(s || '').trim();
+      if (!trimmed) return '';
+      return /[.!?;:]$/.test(trimmed) ? trimmed : trimmed + '.';
+    };
+
     // Nghe toàn bộ bài viết đã ghép
     const speakFullBtn = container.querySelector('#wrt-speak-full');
     if (speakFullBtn) {
       speakFullBtn.onclick = () => {
         const fullTxt = item.sentences
           .map((_, idx) =>
-            tState.sentences[idx] && tState.sentences[idx].text ? tState.sentences[idx].text.trim() : ''
+            tState.sentences[idx] && tState.sentences[idx].text
+              ? ensureSentenceEndPunct(tState.sentences[idx].text)
+              : ''
           )
           .filter(Boolean)
           .join(' ');
@@ -2787,7 +2801,9 @@ Hãy nhận xét trực tiếp vào từng từ/cụm từ học viên đã vi�
       copyFullBtn.onclick = () => {
         const fullTxt = item.sentences
           .map((_, idx) =>
-            tState.sentences[idx] && tState.sentences[idx].text ? tState.sentences[idx].text.trim() : ''
+            tState.sentences[idx] && tState.sentences[idx].text
+              ? ensureSentenceEndPunct(tState.sentences[idx].text)
+              : ''
           )
           .filter(Boolean)
           .join(' ');
