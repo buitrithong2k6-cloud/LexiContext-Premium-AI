@@ -33,7 +33,20 @@
   const sentenceInFlight = new Map();
   let dbPromise = null;
 
-  // Dùng 1 đối tượng Audio duy nhất kèm referrerPolicy="no-referrer" giúp iPadOS/iOS Safari luôn phát âm thanh ngay khi chạm
+  // Bắt buộc chèn <meta name="referrer" content="no-referrer"> vào <head> để Safari trên iPad ẩn Referer khi tải <audio>
+  if (typeof document !== 'undefined' && document.head) {
+    try {
+      let metaRef = document.querySelector('meta[name="referrer"]');
+      if (!metaRef) {
+        metaRef = document.createElement('meta');
+        metaRef.name = 'referrer';
+        document.head.appendChild(metaRef);
+      }
+      metaRef.content = 'no-referrer';
+    } catch (e) {}
+  }
+
+  // Dùng 1 đối tượng Audio duy nhất giúp iPadOS/iOS Safari luôn phát âm thanh xuyên suốt chuỗi cụm câu
   const sharedAudio = typeof Audio !== 'undefined' ? new Audio() : null;
   if (sharedAudio) {
     sharedAudio.preload = 'auto';
@@ -45,46 +58,27 @@
     } catch (e) {}
   }
 
-  // Mở khóa kênh âm thanh Safari trên iPad/iOS ngay ở cú chạm đầu tiên (Synchronous User Gesture Unlock)
-  let iosAudioUnlocked = false;
+  // WAV câm 1-sample (0.04ms) dùng để giữ quyền phát âm thanh đồng bộ (User Gesture Blessing) trên Safari iPad
+  // TUYỆT ĐỐI KHÔNG gắn .then(() => sharedAudio.pause()) để không bao giờ ngắt nhầm câu tiếng Anh đang chuẩn bị phát
   const SILENT_WAV_URI =
     'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
 
-  function unlockIOSAudio() {
-    if (iosAudioUnlocked || !sharedAudio) return;
-    iosAudioUnlocked = true;
+  function primeSharedAudioForGesture() {
+    if (!sharedAudio) return;
     try {
-      if (sharedAudio.paused && !sharedAudio.src) {
-        sharedAudio.muted = true;
-        sharedAudio.src = SILENT_WAV_URI;
-        const p = sharedAudio.play();
-        if (p && typeof p.then === 'function') {
-          p.then(() => {
-            sharedAudio.pause();
-            sharedAudio.muted = false;
-            sharedAudio.currentTime = 0;
-          }).catch(() => {
-            sharedAudio.muted = false;
-          });
-        } else {
-          sharedAudio.muted = false;
-        }
+      sharedAudio.onended = null;
+      sharedAudio.onerror = null;
+      sharedAudio.muted = false;
+      sharedAudio.src = SILENT_WAV_URI;
+      const p = sharedAudio.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {});
       }
-      if ('speechSynthesis' in global && typeof SpeechSynthesisUtterance !== 'undefined') {
-        const u = new SpeechSynthesisUtterance('');
-        u.volume = 0;
-        speechSynthesis.speak(u);
-      }
-    } catch (e) {
-      if (sharedAudio) sharedAudio.muted = false;
-    }
+    } catch (e) {}
   }
 
-  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-    ['touchstart', 'pointerdown', 'click'].forEach((evt) => {
-      document.addEventListener(evt, unlockIOSAudio, { once: true, passive: true, capture: true });
-    });
-  }
+  const CLOUD_TTS_ENDPOINT =
+    'https://ais-pre-cejwq7dx2qvz6dpn3redsu-623504113614.asia-east1.run.app/api/tts';
 
   const SPEAKER_SVG =
     '<svg width="13" height="13" viewBox="0 0 256 256" fill="currentColor" style="display:inline-block;vertical-align:-2px;flex-shrink:0"><path d="M163.51,24.81a8,8,0,0,0-8.42.88L77.25,80H32A16,16,0,0,0,16,96v64a16,16,0,0,0,16,16H77.25l77.84,54.31A8,8,0,0,0,168,224V32A8,8,0,0,0,163.51,24.81ZM152,208.43,84.59,161.4A7.94,7.94,0,0,0,80,160H32V96H80a7.94,7.94,0,0,0,4.59-1.4L152,47.57Zm50.34-118.09a8,8,0,0,1,11.32,0,56,56,0,0,1,0,79.32,8,8,0,0,1-11.32-11.32,40,40,0,0,0,0-56.68A8,8,0,0,1,202.34,90.34Zm25.46-25.45a8,8,0,0,1,11.31,0,92,92,0,0,1,0,130.22,8,8,0,1,1-11.31-11.31,76,76,0,0,0,0-107.6A8,8,0,0,1,227.8,64.89Z"/></svg>';
@@ -305,65 +299,93 @@
     return URL.createObjectURL(blob);
   }
 
-  // Tải trước giọng AI Neural TTS (Gemini 2.5 Flash TTS - Kore US) vào bộ nhớ đệm nếu có kết nối
-  function prefetchGeminiNeuralChunk(chunkText) {
+  // Lấy hoặc tải giọng AI Neural TTS (Gemini 2.5 Flash TTS - Kore US) cho cả AI Studio và GitHub Pages (iPad)
+  function fetchGeminiNeuralChunk(chunkText) {
     const key = normKey(chunkText);
-    if (!key || sentenceAudioCache.has(key) || sentenceInFlight.has(key)) return;
+    if (!key) return Promise.resolve(null);
+    if (sentenceAudioCache.has(key)) {
+      return Promise.resolve(sentenceAudioCache.get(key));
+    }
+    if (sentenceInFlight.has(key)) {
+      return sentenceInFlight.get(key);
+    }
+
+    const spoken = normalizeChunkForUSAudio(chunkText).slice(0, 220);
 
     const job = (async () => {
       try {
-        // 1. Thử gọi qua Backend /api/tts (khi chạy trên AI Studio / Cloud Run)
-        const isStaticGithubPages =
-          typeof location !== 'undefined' && /\.github\.io$/i.test(location.hostname || '');
-        if (!isStaticGithubPages) {
-          const resp = await fetch('/api/tts?text=' + encodeURIComponent(chunkText));
-          if (resp.ok) {
-            const cType = resp.headers.get('content-type') || '';
-            if (cType.includes('audio')) {
-              const blob = await resp.blob();
-              const blobUrl = URL.createObjectURL(blob);
-              sentenceAudioCache.set(key, blobUrl);
-              return blobUrl;
-            }
-          }
-        }
-
-        // 2. Nếu chạy trên GitHub Pages (iPad) và người dùng có cấu hình Gemini Key trong máy
+        // 1. Nếu người dùng có cấu hình Khóa Gemini cá nhân trong máy (trên GitHub Pages / iPad)
         const savedApiKey =
           typeof localStorage !== 'undefined'
             ? (localStorage.getItem('lexicontext_gemini_key_v1') || '').trim()
             : '';
         if (savedApiKey) {
-          const gUrl =
-            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=' +
-            encodeURIComponent(savedApiKey);
-          const gResp = await fetch(gUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: 'Read naturally in clear American English: ' + chunkText }] }],
-              generationConfig: {
-                responseModalities: ['AUDIO'],
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: 'Kore' }
+          const ctl = new AbortController();
+          const tm = setTimeout(() => ctl.abort(), 3200);
+          try {
+            const gUrl =
+              'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=' +
+              encodeURIComponent(savedApiKey);
+            const gResp = await fetch(gUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [
+                  { parts: [{ text: 'Read naturally in clear American English: ' + spoken }] }
+                ],
+                generationConfig: {
+                  responseModalities: ['AUDIO'],
+                  speechConfig: {
+                    voiceConfig: {
+                      prebuiltVoiceConfig: { voiceName: 'Kore' }
+                    }
                   }
                 }
+              }),
+              signal: ctl.signal
+            });
+            if (gResp.ok) {
+              const gJson = await gResp.json();
+              const b64 = gJson?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+              if (b64) {
+                const wavUrl = pcmBase64ToWavBlobUrl(b64);
+                sentenceAudioCache.set(key, wavUrl);
+                return wavUrl;
               }
-            })
-          });
-          if (gResp.ok) {
-            const gJson = await gResp.json();
-            const b64 = gJson?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-            if (b64) {
-              const wavUrl = pcmBase64ToWavBlobUrl(b64);
-              sentenceAudioCache.set(key, wavUrl);
-              return wavUrl;
             }
+          } catch (e) {
+            // Chuyển tiếp sang Cloud TTS Endpoint bên dưới
+          } finally {
+            clearTimeout(tm);
           }
         }
+
+        // 2. Gọi qua Backend /api/tts (hỗ trợ cả trên AI Studio lẫn gọi xuyên miền CORS từ buitrithong2k6-cloud.github.io)
+        const isStaticGithubPages =
+          typeof location !== 'undefined' && /\.github\.io$/i.test(location.hostname || '');
+        const ttsEndpoint = isStaticGithubPages ? CLOUD_TTS_ENDPOINT : '/api/tts';
+        const ctl2 = new AbortController();
+        const tm2 = setTimeout(() => ctl2.abort(), 3200);
+        try {
+          const resp = await fetch(ttsEndpoint + '?text=' + encodeURIComponent(spoken), {
+            signal: ctl2.signal
+          });
+          if (resp.ok) {
+            const cType = resp.headers.get('content-type') || '';
+            if (cType.includes('audio')) {
+              const blob = await resp.blob();
+              if (blob.size > 200) {
+                const blobUrl = URL.createObjectURL(blob);
+                sentenceAudioCache.set(key, blobUrl);
+                return blobUrl;
+              }
+            }
+          }
+        } finally {
+          clearTimeout(tm2);
+        }
       } catch (e) {
-        // Bỏ qua lỗi mạng ngầm, dùng luồng Neural US Stream tức thì
+        // Dùng luồng MP3 no-referrer dự phòng nếu không kết nối được AI TTS
       } finally {
         sentenceInFlight.delete(key);
       }
@@ -371,9 +393,10 @@
     })();
 
     sentenceInFlight.set(key, job);
+    return job;
   }
 
-  // Danh sách các luồng Neural English trả về HTTP 200 (audio/mpeg) cho cụm từ & câu dài trên cả iPad & Web
+  // Danh sách các luồng âm thanh câu dài: Ưu tiên 1 = Giọng AI Gemini 2.5 Neural US (WAV), Ưu tiên 2 = MP3 no-referrer tốc độ cao
   function buildSentenceStreamCandidates(chunkText) {
     const key = normKey(chunkText);
     const spoken = normalizeChunkForUSAudio(chunkText).slice(0, 200);
@@ -384,10 +407,7 @@
       candidates.push(sentenceAudioCache.get(key));
     }
 
-    // Luồng 1: Neural English Stream (trả về HTTP 200 audio/mpeg cho mọi câu dài trên Safari iPad & GitHub Pages)
-    candidates.push('https://fanyi.baidu.com/gettts?lan=en&text=' + enc + '&spd=5&source=web');
-
-    // Luồng 2: Google US Stream (kết hợp referrerPolicy="no-referrer" trên sharedAudio)
+    // Luồng MP3 chuẩn Mỹ tốc độ cao (trả về HTTP 200 - 15,168 bytes audio/mpeg nhờ <meta name="referrer" content="no-referrer">)
     candidates.push(
       'https://translate.googleapis.com/translate_tts?ie=UTF-8&q=' +
         enc +
@@ -488,21 +508,30 @@
   function playSingleChunkUS(chunkText, callbacks = {}) {
     const text = String(chunkText || '').trim();
     if (!text) return;
-    unlockIOSAudio();
     stopAudioPlayback();
+    primeSharedAudioForGesture();
     const myToken = activePlaybackToken;
 
     if (typeof callbacks.onStart === 'function') callbacks.onStart();
 
-    prefetchGeminiNeuralChunk(text);
-    const candidates = isSentenceText(text)
-      ? buildSentenceStreamCandidates(text)
-      : [buildSingleWordUSUrl(text), ...buildSentenceStreamCandidates(text)];
+    (async () => {
+      if (isSentenceText(text)) {
+        // Chờ tối đa 1.8s để ưu tiên lấy giọng AI Gemini 2.5 Neural US trước khi rơi về MP3 dự phòng
+        await Promise.race([
+          fetchGeminiNeuralChunk(text),
+          new Promise((r) => setTimeout(r, 1800))
+        ]);
+      }
+      if (myToken !== activePlaybackToken) return;
+      const candidates = isSentenceText(text)
+        ? buildSentenceStreamCandidates(text)
+        : [buildSingleWordUSUrl(text), ...buildSentenceStreamCandidates(text)];
 
-    playAudioCandidateList(candidates, text, 0.92, myToken, () => {
-      if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
-      if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
-    });
+      playAudioCandidateList(candidates, text, 0.92, myToken, () => {
+        if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
+        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+      });
+    })();
   }
 
   // Phát từ đơn hoặc câu dài bằng kỹ thuật Chunking & Pausing (Chuẩn US duy nhất)
@@ -512,8 +541,8 @@
     const text = String(rawText || '').trim();
     if (!text) return;
 
-    unlockIOSAudio();
     stopAudioPlayback();
+    primeSharedAudioForGesture();
     const myToken = activePlaybackToken;
     const isSentence = isSentenceText(text);
 
@@ -539,14 +568,13 @@
     // 2. Cụm từ & Câu dài: Áp dụng kỹ thuật Breath-Group Chunking & Preloaded Queue (Chuẩn US)
     const chunks = splitIntoBreathChunks(text);
 
-    // Nạp trước song song (Parallel Preload) tất cả các cụm vào bộ nhớ đệm trình duyệt để chuyển cụm 0ms delay
+    // Kích hoạt tải song song giọng AI Gemini 2.5 Neural US và MP3 dự phòng cho toàn bộ các cụm
+    const aiPromises = chunks.map((c) => fetchGeminiNeuralChunk(c));
     const preloaders = chunks.map((c) => {
-      prefetchGeminiNeuralChunk(c);
       const cands = buildSentenceStreamCandidates(c);
       try {
         const a = new Audio();
         a.preload = 'auto';
-        a.referrerPolicy = 'no-referrer';
         a.src = cands[0];
         a.load();
         return a;
@@ -636,10 +664,16 @@
       );
     }
 
-    // Giữ tham chiếu preloaders trong suốt phiên đọc để trình duyệt không thu hồi sớm
-    if (preloaders.length) {
-      playChunkAt(0);
-    }
+    // Chờ tối đa 1.8s cho Cụm 1 nạp giọng AI Gemini 2.5 Neural US (trong khi sharedAudio đã được mở khóa gesture)
+    // Nếu đã có trong cache thì phát tức thì 0ms; nếu mạng AI chậm quá 1.8s thì phát ngay luồng MP3 no-referrer
+    (async () => {
+      if (aiPromises[0]) {
+        await Promise.race([aiPromises[0], new Promise((r) => setTimeout(r, 1800))]);
+      }
+      if (myToken === activePlaybackToken && preloaders.length) {
+        playChunkAt(0);
+      }
+    })();
   }
 
   function upgradeSpeakerButtons() {
