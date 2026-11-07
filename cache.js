@@ -229,6 +229,46 @@
     return finalChunks.filter(Boolean);
   }
 
+  // Chia đoạn văn thành từng câu nguyên vẹn (chỉ tách ở dấu kết câu . ? ! ;) để chế độ "🔊 Nghe US" đọc liền mạch tự nhiên như giao tiếp thật
+  function splitIntoFullSentences(rawText) {
+    const clean = String(rawText || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!clean) return [];
+
+    const rawSentences = clean
+      .split(/(?<=[.!?;])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const result = [];
+    rawSentences.forEach((sent) => {
+      if (sent.length <= 190) {
+        result.push(sent);
+      } else {
+        // Nếu 1 câu đơn quá dài (>190 ký tự), tách nhẹ tại dấu phẩy để không vượt giới hạn luồng âm thanh
+        const clauses = sent
+          .split(/(?<=[,])\s+/)
+          .map((c) => c.trim())
+          .filter(Boolean);
+        let buf = '';
+        clauses.forEach((cl) => {
+          if (!buf) {
+            buf = cl;
+          } else if ((buf + ' ' + cl).length <= 190) {
+            buf += ' ' + cl;
+          } else {
+            result.push(buf);
+            buf = cl;
+          }
+        });
+        if (buf) result.push(buf);
+      }
+    });
+
+    return result.length ? result : [clean];
+  }
+
   function prefetchDictionaryMp3(word) {
     const w = normKey(word);
     if (!w || w.includes(' ') || cambridgeMp3Cache.has(w)) return;
@@ -249,11 +289,11 @@
       .catch(() => {});
   }
 
-  // Chuẩn hóa văn bản cụm trước khi gửi lên bộ đọc US để tránh nuốt tên riêng "An" như mạo từ "an"
+  // Chuẩn hóa văn bản trước khi gửi lên bộ đọc US để tránh đọc nhầm tên riêng "An" thành mạo từ "an" hoặc "on"
   function normalizeChunkForUSAudio(chunkText) {
     return String(chunkText || '')
-      .replace(/,\s*An\s*,/g, ', Ahn,')
-      .replace(/\bAn\b(?=\s*,|\s+who\b|\s+will\b)/g, 'Ahn')
+      .replace(/,\s*An\s*,/g, ', Ann,')
+      .replace(/\bAn\b(?=\s*,|\s+who\b|\s+will\b|\s+is\b|\s+has\b)/g, 'Ann')
       .trim();
   }
 
@@ -407,7 +447,7 @@
       candidates.push(sentenceAudioCache.get(key));
     }
 
-    // Luồng MP3 chuẩn Mỹ tốc độ cao (trả về HTTP 200 - 15,168 bytes audio/mpeg nhờ <meta name="referrer" content="no-referrer">)
+    // Luồng MP3 chuẩn Mỹ tốc độ cao (trả về HTTP 200 audio/mpeg nhờ <meta name="referrer" content="no-referrer">)
     candidates.push(
       'https://translate.googleapis.com/translate_tts?ie=UTF-8&q=' +
         enc +
@@ -504,7 +544,7 @@
     tryPlayCurrent();
   }
 
-  // Phát 1 cụm đơn lẻ bằng chuẩn US (dùng khi bấm vào từng thẻ cụm trong khung Shadowing)
+  // Phát 1 cụm đơn lẻ bằng chuẩn US (dùng khi bấm vào từng thẻ cụm trong khung Tách cụm)
   function playSingleChunkUS(chunkText, callbacks = {}) {
     const text = String(chunkText || '').trim();
     if (!text) return;
@@ -534,9 +574,9 @@
     })();
   }
 
-  // Phát từ đơn hoặc câu dài bằng kỹ thuật Chunking & Pausing (Chuẩn US duy nhất)
-  // - Khi isShadowing = false (🔊 Nghe US): Nạp trước toàn bộ cụm, phát nối tiếp 0ms delay như câu giao tiếp lưu loát
-  // - Khi isShadowing = true (🎯 Shadowing): Sau mỗi cụm dừng đúng 1500ms (1.5s) để người học nhại theo
+  // Phát từ đơn hoặc câu dài (Chuẩn US duy nhất):
+  // - Khi isShadowing = false (🔊 Nghe US): Đọc nguyên câu liền mạch như giao tiếp thật (không cắt vụn thành các cụm nhỏ)
+  // - Khi isShadowing = true (Tách cụm): Chia theo cụm nhịp thở và dừng đúng 1500ms (1.5s) giữa các cụm
   function playCambridgeAudio(rawText, _accent = 'us', isShadowing = false, callbacks = {}) {
     const text = String(rawText || '').trim();
     if (!text) return;
@@ -565,10 +605,12 @@
       return;
     }
 
-    // 2. Cụm từ & Câu dài: Áp dụng kỹ thuật Breath-Group Chunking & Preloaded Queue (Chuẩn US)
-    const chunks = splitIntoBreathChunks(text);
+    // 2. Câu dài:
+    // - Nghe US (isShadowing = false): Giữ nguyên cả câu trọn vẹn để ngữ điệu nối âm tự nhiên 100%
+    // - Tách cụm (isShadowing = true): Tách theo cụm nhịp thở và nghỉ 1.5s giữa các cụm
+    const chunks = isShadowing ? splitIntoBreathChunks(text) : splitIntoFullSentences(text);
 
-    // Kích hoạt tải song song giọng AI Gemini 2.5 Neural US và MP3 dự phòng cho toàn bộ các cụm
+    // Kích hoạt tải song song giọng AI Gemini 2.5 Neural US và MP3 dự phòng
     const aiPromises = chunks.map((c) => fetchGeminiNeuralChunk(c));
     const preloaders = chunks.map((c) => {
       const cands = buildSentenceStreamCandidates(c);
@@ -583,7 +625,7 @@
       }
     });
 
-    const pauseMs = isShadowing ? 1500 : 0; // Shadowing dừng 1.5s sau mỗi cụm; Nghe US lưu loát dừng 0ms
+    const pauseMs = isShadowing ? 1500 : 0;
     const hasCustomUI =
       typeof callbacks.onChunkStart === 'function' ||
       typeof callbacks.onPauseStart === 'function' ||
@@ -593,7 +635,7 @@
       if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
       if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
       if (isShadowing && !hasCustomUI) {
-        notify('✓ Hoàn tất lượt luyện Shadowing (dừng 1.5s mỗi cụm)');
+        notify('✓ Hoàn tất đọc tách cụm (dừng 1.5s giữa các cụm)');
       }
     }
 
@@ -630,7 +672,6 @@
               playChunkAt(idx + 1);
             }, pauseMs);
           } else {
-            // 0ms delay: nối tiếp ngay lập tức sang cụm tiếp theo đã nạp sẵn
             playChunkAt(idx + 1);
           }
         } else {
@@ -664,8 +705,6 @@
       );
     }
 
-    // Chờ tối đa 1.8s cho Cụm 1 nạp giọng AI Gemini 2.5 Neural US (trong khi sharedAudio đã được mở khóa gesture)
-    // Nếu đã có trong cache thì phát tức thì 0ms; nếu mạng AI chậm quá 1.8s thì phát ngay luồng MP3 no-referrer
     (async () => {
       if (aiPromises[0]) {
         await Promise.race([aiPromises[0], new Promise((r) => setTimeout(r, 1800))]);
@@ -693,7 +732,7 @@
       btn.dataset.accent = 'us';
       btn.className =
         'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border border-sky/40 bg-sky/10 text-sky hover:brightness-110 cursor-pointer transition-colors';
-      btn.title = isSentence ? 'Nghe cả câu lưu loát chuẩn Mỹ (US)' : 'Nghe phát âm chuẩn Mỹ (US)';
+      btn.title = isSentence ? 'Nghe cả câu liền mạch chuẩn Mỹ (US)' : 'Nghe phát âm chuẩn Mỹ (US)';
       btn.innerHTML = SPEAKER_SVG + '<span>US</span>';
 
       if (btn.parentNode && isSentence && !btn.parentNode.querySelector('[data-shadowing-btn]')) {
@@ -706,8 +745,8 @@
         shadowBtn.setAttribute('data-cambridge-upgraded', '1');
         shadowBtn.className =
           'inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border border-warn/40 bg-warn/10 text-warn hover:brightness-110 cursor-pointer transition-colors';
-        shadowBtn.title = 'Luyện Shadowing: Đọc tách từng cụm và dừng 1.5s sau mỗi cụm để nhại theo';
-        shadowBtn.innerHTML = SHADOW_SVG + '<span>Shadow</span>';
+        shadowBtn.title = 'Ẩn/hiện khung Tách cụm (Đọc cả câu dừng 1.5s giữa các cụm hoặc chọn từng cụm để nghe)';
+        shadowBtn.innerHTML = '<span>Tách cụm</span>';
         btn.parentNode.insertBefore(shadowBtn, btn.nextSibling);
       }
 
@@ -717,23 +756,46 @@
     });
   }
 
-  function attachInlineShadowBar(btn, sentenceText) {
+  function toggleInlineChunkBar(btn, sentenceText) {
     const hostRow = btn.parentElement;
-    if (!hostRow || !hostRow.parentElement) return null;
+    if (!hostRow || !hostRow.parentElement) return;
     const container = hostRow.parentElement;
     let bar = container.querySelector('.lexi-inline-shadow-bar');
+
+    // Nếu khung Tách cụm đang mở -> Bấm lần nữa sẽ ẩn đi và dừng phát âm
+    if (bar && !bar.classList.contains('hidden')) {
+      bar.classList.add('hidden');
+      stopAudioPlayback();
+      btn.innerHTML = '<span>Tách cụm</span>';
+      return;
+    }
+
     if (!bar) {
       bar = document.createElement('div');
       bar.className =
         'lexi-inline-shadow-bar mt-2 p-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2 text-xs';
       container.appendChild(bar);
+    } else {
+      bar.classList.remove('hidden');
     }
+
+    btn.innerHTML = '<span>Ẩn tách cụm</span>';
 
     const chunks = splitIntoBreathChunks(sentenceText);
     bar.innerHTML = `
       <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-1.5">
-        <span class="font-bold text-amber-400">🎯 Shadowing tách cụm (Chuẩn US · Dừng 1.5s)</span>
-        <span data-inline-shadow-status class="font-mono text-[11px] text-mute"></span>
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-amber-400">Tách cụm (Chuẩn US)</span>
+          <span data-inline-shadow-status class="font-mono text-[11px] text-mute"></span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button type="button" data-inline-play-all class="px-2 py-0.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold hover:bg-amber-500/30 whitespace-nowrap">
+            ▶ Đọc cả câu (Dừng 1.5s giữa các cụm)
+          </button>
+          <button type="button" data-inline-stop class="px-2 py-0.5 rounded-lg border border-line text-mute hover:text-fg whitespace-nowrap">
+            ⏹ Dừng
+          </button>
+        </div>
       </div>
       <div data-inline-shadow-chunks class="flex flex-wrap items-center gap-1.5">
         ${chunks
@@ -750,6 +812,9 @@
     `;
 
     const statusEl = bar.querySelector('[data-inline-shadow-status]');
+    const playAllBtn = bar.querySelector('[data-inline-play-all]');
+    const stopBtn = bar.querySelector('[data-inline-stop]');
+
     const resetHighlight = () => {
       bar.querySelectorAll('[data-inline-chunk-idx]').forEach((b) => {
         b.className =
@@ -757,26 +822,7 @@
       });
     };
 
-    bar.querySelectorAll('[data-inline-chunk-idx]').forEach((b) => {
-      b.onclick = (ev) => {
-        ev.stopPropagation();
-        const idx = Number(b.getAttribute('data-inline-chunk-idx'));
-        const chunkTxt = chunks[idx];
-        if (!chunkTxt) return;
-        resetHighlight();
-        b.className =
-          'px-2 py-1 rounded-lg border border-sky-400 bg-sky-500/20 text-sky-200 ring-2 ring-sky-400/60 transition font-mono text-xs text-left font-bold';
-        if (statusEl) statusEl.textContent = `🔊 Cụm ${idx + 1}/${chunks.length} (US)...`;
-        playSingleChunkUS(chunkTxt, {
-          onComplete: () => {
-            resetHighlight();
-            if (statusEl) statusEl.textContent = `✓ Đã đọc cụm ${idx + 1}/${chunks.length}`;
-          }
-        });
-      };
-    });
-
-    return {
+    const callbacks = {
       onChunkStart: (idx, total) => {
         resetHighlight();
         const activeBtn = bar.querySelector(`[data-inline-chunk-idx="${idx}"]`);
@@ -800,6 +846,41 @@
         if (statusEl) statusEl.textContent = '✓ Hoàn tất (Bấm từng cụm để nghe lại)';
       }
     };
+
+    if (playAllBtn) {
+      playAllBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        playCambridgeAudio(sentenceText, 'us', true, callbacks);
+      };
+    }
+
+    if (stopBtn) {
+      stopBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        stopAudioPlayback();
+        resetHighlight();
+        if (statusEl) statusEl.textContent = '⏹ Đã dừng.';
+      };
+    }
+
+    bar.querySelectorAll('[data-inline-chunk-idx]').forEach((b) => {
+      b.onclick = (ev) => {
+        ev.stopPropagation();
+        const idx = Number(b.getAttribute('data-inline-chunk-idx'));
+        const chunkTxt = chunks[idx];
+        if (!chunkTxt) return;
+        resetHighlight();
+        b.className =
+          'px-2 py-1 rounded-lg border border-sky-400 bg-sky-500/20 text-sky-200 ring-2 ring-sky-400/60 transition font-mono text-xs text-left font-bold';
+        if (statusEl) statusEl.textContent = `🔊 Cụm ${idx + 1}/${chunks.length} (US)...`;
+        playSingleChunkUS(chunkTxt, {
+          onComplete: () => {
+            resetHighlight();
+            if (statusEl) statusEl.textContent = `✓ Đã đọc cụm ${idx + 1}/${chunks.length}`;
+          }
+        });
+      };
+    });
   }
 
   document.addEventListener(
@@ -824,11 +905,11 @@
       }
 
       if (textToSpeak) {
-        let cb = {};
         if (isShadow && isSentenceText(textToSpeak)) {
-          cb = attachInlineShadowBar(btn, textToSpeak) || {};
+          toggleInlineChunkBar(btn, textToSpeak);
+        } else {
+          playCambridgeAudio(textToSpeak, 'us', isShadow, {});
         }
-        playCambridgeAudio(textToSpeak, 'us', isShadow, cb);
       } else {
         notify('Hãy nhập từ vựng trước khi nghe.');
       }
