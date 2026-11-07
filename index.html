@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="referrer" content="no-referrer">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="theme-color" content="#020617">
 <title>LexiContext AI Pro</title>
 <meta name="description" content="Ứng dụng học từ vựng và ngữ cảnh tiếng Anh chuyên sâu (Y khoa, Học thuật CEFR A1-C2, Cụm động từ) tích hợp hệ thống Smart Cache đa tầng giúp tiết kiệm tối đa lượt gọi Gemini API." />
@@ -565,9 +565,10 @@ setTheme(document.documentElement.classList.contains('dark')?'dark':'light',fals
 if(!storageOK){const b=document.createElement('button');b.className='fixed bottom-2 left-2 right-2 z-50 p-3 rounded-xl bg-warn text-app text-xs font-semibold';
  b.textContent='Trang này chặn lưu trữ: từ vựng sẽ mất khi tải lại. Hãy xuất dữ liệu thường xuyên (Cài đặt → Xuất dữ liệu). Chạm để ẩn.';b.onclick=()=>b.remove();document.body.appendChild(b)}
 </script>
-<script src="./cache.js?v=8"></script>
+<script src="./cache.js?v=9"></script>
 <script src="./academy-core.js?v=2"></script>
-<script src="./academy-listening.js?v=4"></script>
+<script src="./listening-lessons-data.js?v=1"></script>
+<script src="./academy-listening.js?v=5"></script>
 <script src="./academy-writing.js?v=3"></script>
 <script src="./academy-speaking.js?v=4"></script>
 <script src="./academy-grammar.js?v=2"></script>
