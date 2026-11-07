@@ -33,16 +33,34 @@
   const sentenceInFlight = new Map();
   let dbPromise = null;
 
-  // Bắt buộc chèn <meta name="referrer" content="no-referrer"> vào <head> để Safari trên iPad ẩn Referer khi tải <audio>
+  // Giữ <meta name="referrer" content="strict-origin-when-cross-origin"> mặc định để YouTube <iframe> không bị Lỗi 153
+  // Chỉ bật tạm thời 'no-referrer' trong 180ms ngay khoảnh khắc nạp luồng MP3 từ translate_tts
+  let pageMetaReferrer = null;
   if (typeof document !== 'undefined' && document.head) {
     try {
-      let metaRef = document.querySelector('meta[name="referrer"]');
-      if (!metaRef) {
-        metaRef = document.createElement('meta');
-        metaRef.name = 'referrer';
-        document.head.appendChild(metaRef);
+      pageMetaReferrer = document.querySelector('meta[name="referrer"]');
+      if (!pageMetaReferrer) {
+        pageMetaReferrer = document.createElement('meta');
+        pageMetaReferrer.name = 'referrer';
+        document.head.appendChild(pageMetaReferrer);
       }
-      metaRef.content = 'no-referrer';
+      pageMetaReferrer.content = 'strict-origin-when-cross-origin';
+    } catch (e) {}
+  }
+
+  let restoreRefTimer = null;
+  function applyAudioReferrerShield(url) {
+    if (!pageMetaReferrer) return;
+    const isExternalTts = typeof url === 'string' && /^https?:\/\//i.test(url) && !url.startsWith('blob:') && !url.startsWith('data:');
+    if (!isExternalTts) return;
+    try {
+      pageMetaReferrer.content = 'no-referrer';
+      if (restoreRefTimer) clearTimeout(restoreRefTimer);
+      restoreRefTimer = setTimeout(() => {
+        try {
+          if (pageMetaReferrer) pageMetaReferrer.content = 'strict-origin-when-cross-origin';
+        } catch (e) {}
+      }, 180);
     } catch (e) {}
   }
 
@@ -532,6 +550,7 @@
           if (myToken !== activePlaybackToken) return;
           tryPlayCurrent();
         };
+        applyAudioReferrerShield(url);
         sharedAudio.src = url;
         sharedAudio.playbackRate = clampedRate;
         const p = sharedAudio.play();
@@ -2469,6 +2488,9 @@
   global.splitIntoBreathChunks = splitIntoBreathChunks;
   global.playSingleChunkUS = playSingleChunkUS;
   global.stopAudioPlayback = stopAudioPlayback;
+  global.getSharedAudioElement = function () {
+    return sharedAudio;
+  };
   global.openSyncModal = renderSyncModal;
   global.buildMedicalBreakdownHTML = buildMedicalBreakdownHTML;
 
