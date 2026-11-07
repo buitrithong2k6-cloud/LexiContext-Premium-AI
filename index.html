@@ -6,8 +6,11 @@
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#020617">
 <title>LexiContext AI Pro</title>
-<link rel="icon" type="image/svg+xml" href="./icon.svg">
-<link rel="apple-touch-icon" href="./icon.svg"> 
+<meta name="description" content="Ứng dụng học từ vựng và ngữ cảnh tiếng Anh chuyên sâu (Y khoa, Học thuật CEFR A1-C2, Cụm động từ) tích hợp hệ thống Smart Cache đa tầng giúp tiết kiệm tối đa lượt gọi Gemini API." />
+<meta property="og:title" content="LexiContext AI Pro" />
+<meta property="og:description" content="Ứng dụng học từ vựng và ngữ cảnh tiếng Anh chuyên sâu (Y khoa, Học thuật CEFR A1-C2, Cụm động từ) tích hợp hệ thống Smart Cache đa tầng giúp tiết kiệm tối đa lượt gọi Gemini API." />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
 <link rel="manifest" href="./manifest.json">
 <script>/* Chọn giao diện sáng/tối trước khi vẽ trang để không bị nháy */
 (function(){var t=null;try{t=localStorage.getItem('lexicontext_theme_mode')}catch(e){}
@@ -53,6 +56,8 @@ body{background:rgb(var(--app));color:rgb(var(--fg));font-family:Inter,sans-seri
 </style>
 </head>
 <body class="min-h-screen flex flex-col pb-16">
+<div id="root" class="hidden"></div>
+<script type="module" src="/src/main.tsx"></script>
 
 <div id="selbar" class="card fixed z-[60] hidden left-1/2 -translate-x-1/2 w-[94%] max-w-xl p-3 shadow-2xl" style="top:7rem">
  <div class="flex flex-wrap items-center justify-between gap-2">
@@ -71,6 +76,7 @@ body{background:rgb(var(--app));color:rgb(var(--fg));font-family:Inter,sans-seri
   <div class="h-14 flex items-center justify-between gap-2">
    <button class="flex items-center gap-2 font-bold text-lg" data-a="tab" data-v="vault"><i class="ph-fill ph-brain text-pri text-xl"></i>LexiContext</button>
    <div class="flex items-center gap-1.5">
+    <button class="btn border-pri/40 bg-pri/10 text-pri font-bold" data-a="sync" title="Đồng bộ 2 thiết bị (iPad, iPhone, PC)"><i class="ph-fill ph-arrows-clockwise"></i><span class="hidden sm:inline">Đồng bộ</span></button>
     <button class="btn" data-a="theme" aria-label="Đổi giao diện sáng/tối" title="Sáng / tối"><i id="theme-ico" class="ph-fill ph-moon"></i></button>
     <button class="btn" data-a="quick-look"><i class="ph-fill ph-magnifying-glass-plus"></i><span class="hidden sm:inline">Tra nhanh</span></button>
     <button class="btn" data-a="open" data-v="m-topics"><i class="ph-fill ph-folders"></i>Chủ đề</button>
@@ -192,13 +198,15 @@ body{background:rgb(var(--app));color:rgb(var(--fg));font-family:Inter,sans-seri
 
 <div id="m-set" class="modal"><div class="card sheet space-y-5">
  <div class="flex justify-between items-center"><h3 class="font-bold text-lg">Cài đặt & dữ liệu</h3><button class="btn" data-a="close" data-v="m-set" aria-label="Đóng"><i class="ph ph-x"></i></button></div>
- <div class="space-y-2"><label class="lbl" for="key">Gemini API key (lấy miễn phí tại aistudio.google.com/apikey)</label>
-  <div class="flex gap-2"><input id="key" type="password" class="inp font-mono" placeholder="AIza..." autocomplete="off"><button class="btn btn-pri" data-a="key-save">Lưu key</button></div>
+ <div class="space-y-2">
   <button class="btn" data-a="key-test">Kiểm tra kết nối AI</button><div id="test-out" class="text-xs break-words"></div></div>
- <div class="space-y-2 pt-3 border-t border-line/60"><b class="text-sm">Sao lưu & khôi phục</b>
-  <div class="flex flex-wrap gap-2"><button class="btn" data-a="export"><i class="ph ph-download-simple"></i>Xuất dữ liệu</button>
-   <label class="btn cursor-pointer"><i class="ph ph-upload-simple"></i>Nhập dữ liệu<input id="import" type="file" accept=".json" class="hidden"></label>
-   <button class="btn btn-bad ml-auto" data-a="reset">Khôi phục dữ liệu mẫu</button></div></div>
+ <div class="space-y-2 pt-3 border-t border-line/60"><b class="text-sm">Đồng bộ & sao lưu dữ liệu</b>
+  <div class="flex flex-wrap gap-2">
+   <button class="btn btn-pri" data-a="sync"><i class="ph-fill ph-arrows-clockwise"></i>Đồng bộ 2 thiết bị (Mã 6 số)</button>
+   <button class="btn" data-a="export"><i class="ph ph-download-simple"></i>Xuất file</button>
+   <label class="btn cursor-pointer"><i class="ph ph-upload-simple"></i>Nhập file<input id="import" type="file" accept=".json" class="hidden"></label>
+   <button class="btn btn-bad ml-auto" data-a="reset">Khôi phục dữ liệu mẫu</button>
+  </div></div>
 </div></div>
 
 <div id="toasts" class="fixed top-20 right-3 z-[70] flex flex-col gap-2 w-[calc(100%-1.5rem)] max-w-sm pointer-events-none"></div>
@@ -252,39 +260,28 @@ function load(){try{const m=JSON.parse(ls.get(K.ALL)||'null'),l=JSON.parse(ls.ge
  words=(src.words&&src.words.length?src.words:DEFAULT_WORDS).map(norm);mistakes=Array.isArray(src.mistakes)?src.mistakes:[];topics=Array.isArray(src.topics)&&src.topics.length?src.topics:clone(DEFAULT_TOPICS)}
  catch(e){words=DEFAULT_WORDS.map(norm);mistakes=[];topics=clone(DEFAULT_TOPICS)}save()}
 
-/* ===== Gemini: tự tìm model, giới hạn thời gian, báo lỗi dễ hiểu ===== */
-let aiModels=null,aiKey0='',aiUsed='',onProg=null;
-const aiKey=()=>(ls.get(K.KEY)||'').trim();
-async function listModels(key){
- if(aiModels&&aiKey0===key)return aiModels;let n=[],tok='';
- try{for(let p=0;p<6;p++){const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?key='+encodeURIComponent(key)+(tok?'&pageToken='+tok:''));if(!r.ok)break;const j=await r.json();
-  n=n.concat((j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/','')));tok=j.nextPageToken;if(!tok)break}}catch(e){}
- n=n.filter(x=>/^gemini-/.test(x)&&/flash/.test(x)&&!/image|tts|live|audio|embed|robotics|computer|vision/.test(x));
- const rk=x=>parseFloat((x.match(/gemini-(\d+(?:\.\d+)?)/)||[0,0])[1])*100+(/latest/.test(x)?5:0)-(/lite/.test(x)?3:0)-(/preview|exp/.test(x)?2:0);
- aiModels=[...new Set([...n.sort((a,b)=>rk(b)-rk(a)),'gemini-flash-latest','gemini-2.5-flash'])];aiKey0=key;return aiModels}
-async function once(model,key,text,schema){
+/* ===== Gemini: gọi qua Server Proxy kèm Smart Cache ===== */
+let aiUsed='gemini-3.8-flash',onProg=null;
+async function rawAi(prompt,schema,fast){
+ if(onProg)onProg(fast?'gemini-3.1-flash-lite':'gemini-3.8-flash',1,1);
  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),25000);
- try{const body={contents:[{parts:[{text}]}]};if(schema)body.generationConfig={responseMimeType:'application/json',responseSchema:schema};
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
-  if(r.ok){const j=await r.json();return{ok:true,text:(j?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('')}}
-  let msg='';try{msg=(await r.json())?.error?.message||''}catch(e){}return{ok:false,status:r.status,msg}}
- catch(e){return e.name==='AbortError'?{ok:false,status:-1,msg:'Quá 25 giây chưa có phản hồi'}:{ok:false,status:0,msg:'Lỗi mạng hoặc bị chặn: '+e.message}}
- finally{clearTimeout(tm)}}
+ try{
+  const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,schema,fast}),signal:ctl.signal});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j?.error||('HTTP '+r.status));
+  aiUsed=j.model||'gemini-3.8-flash';
+  return String(j.text||'').replace(/^\s*```(?:json)?\s*|\s*```\s*$/g,'');
+ }catch(e){
+  if(e.name==='AbortError')throw new Error('Quá 25 giây chưa có phản hồi');
+  throw e;
+ }finally{clearTimeout(tm)}
+}
 async function ai(prompt,schema,fast){
- const key=aiKey();let models;
- if(!key)models=['gemini-2.5-flash','gemini-2.5-flash-preview-09-2025'];   // chạy trong Gemini Canvas (không cần key)
- else{const all=await listModels(key),lite=all.filter(n=>/lite/.test(n)),full=all.filter(n=>!/lite/.test(n));models=(fast?lite.concat(full):full.concat(lite)).slice(0,3)}
- let err='';
- for(let i=0;i<models.length;i++){const m=models[i];if(onProg)onProg(m,i+1,models.length);
-  let r=await once(m,key,prompt,schema);
-  if(!r.ok&&r.status===400&&schema&&!/api key/i.test(r.msg))r=await once(m,key,prompt+'\n\nChỉ trả về JSON thuần, không kèm chú thích.',null);
-  if(r.ok&&r.text){aiUsed=m;return r.text.replace(/^\s*```(?:json)?\s*|\s*```\s*$/g,'')}
-  err=`${m} → ${r.ok?'trả về rỗng':'HTTP '+r.status+': '+String(r.msg).slice(0,150)}`;
-  if(r.status===0||r.status===401||r.status===403||(r.status===400&&/api key/i.test(r.msg)))break}
- throw new Error(err)}
+ if(window.LexiCache)return window.LexiCache.wrapAI(prompt,schema,fast,rawAi);
+ return rawAi(prompt,schema,fast)}
 function friendly(m){m=String(m||'');
  if(/Quá \d+ giây/.test(m))return'AI trả lời quá chậm (quá 25 giây). Hãy thử lại sau.';
- if(/api key|HTTP 40[13]|PERMISSION/i.test(m))return'Khóa API không hợp lệ hoặc chưa có quyền. Vào Cài đặt, dán lại khóa rồi bấm Kiểm tra kết nối AI.';
+ if(/api key|HTTP 40[13]|PERMISSION/i.test(m))return'Khóa API chưa hợp lệ hoặc chưa có quyền.';
  if(/429|quota|RESOURCE_EXHAUSTED/i.test(m))return'Đã hết lượt dùng miễn phí tạm thời. Chờ 1–2 phút rồi thử lại.';
  if(/503|500|overload|UNAVAILABLE/i.test(m))return'Máy chủ Gemini đang quá tải. Thử lại sau ít phút.';
  if(/404|not found/i.test(m))return'Model AI không còn dùng được với khóa này.';
@@ -299,7 +296,7 @@ const rules=()=>`Quy tắc: "meaning" = nghĩa TIẾNG VIỆT ngắn gọn; "exp
 /* ===== Giao diện: sáng/tối, tab, modal ===== */
 function setTheme(t,persist){document.documentElement.classList.toggle('dark',t==='dark');$('theme-ico').className=t==='dark'?'ph-fill ph-moon':'ph-fill ph-sun';
  document.querySelector('meta[name=theme-color]').content=t==='dark'?'#020617':'#f1f5f9';if(persist)ls.set(K.THEME,t)}
-const open=id=>{$(id).classList.add('open');if(id==='m-topics')renderManager();if(id==='m-set')$('key').value=ls.get(K.KEY)||''},close=id=>$(id).classList.remove('open');
+const open=id=>{$(id).classList.add('open');if(id==='m-topics')renderManager()},close=id=>$(id).classList.remove('open');
 function tab(id){S.tab=id;['vault','add','quiz','mistakes'].forEach(t=>{$('tab-'+t).classList.toggle('hidden',t!==id);$('nav-'+t).classList.toggle('on',t===id)});
  if(id==='vault')renderVault();if(id==='quiz'&&!S.quiz)genQuiz();if(id==='mistakes')renderMistakes();scrollTo({top:0,behavior:'smooth'})}
 function renderStats(){const n=f=>words.filter(f).length;
@@ -333,9 +330,9 @@ function renderVault(){const q=$('q').value.trim().toLowerCase();
    <div class="flex items-center justify-between text-xs"><button data-a="detail" data-v="${w.id}" class="text-pri">Chi tiết</button>
     <div class="flex gap-1"><button class="btn" data-a="test" data-v="${w.id}">Test</button><button class="btn" data-a="edit" data-v="${w.id}" aria-label="Sửa"><i class="ph ph-pencil-simple"></i></button><button class="btn" data-a="del" data-v="${w.id}" aria-label="Xóa"><i class="ph ph-trash"></i></button></div></div></div></article>`}).join('')
   :`<div class="card p-10 text-center col-span-full space-y-3"><p class="text-sm text-mute">Không có từ nào khớp bộ lọc.</p><button class="btn btn-pri" data-a="tab" data-v="add">Thêm từ mới</button></div>`}
-function openDetail(id){const w=words.find(x=>x.id===id);if(!w)return;const m=mInfo(w.mastery);
+function openDetail(id){const w=words.find(x=>x.id===id);if(!w)return;
  $('detail').innerHTML=`<div class="flex justify-between border-b border-line/60 pb-3"><div><div class="flex flex-wrap items-center gap-2"><h2 class="text-xl font-bold">${esc(w.word)}</h2><span class="text-xs font-mono px-2 py-0.5 rounded border ${chipCls(CC[w.cefr])}">${w.cefr}</span><span class="text-xs font-mono text-pri">${esc(w.ipa)}</span></div><p class="font-semibold text-ok mt-1">${esc(w.meaning)}</p></div><button class="btn h-fit" data-a="close" data-v="m-detail" aria-label="Đóng"><i class="ph ph-x"></i></button></div>
- <div class="space-y-3 text-sm pt-3">${hasMed(w)?`<div class="inset p-3 font-mono text-xs text-bad">Tiền tố: ${esc(w.medAnatomy.prefix)} | Gốc: ${esc(w.medAnatomy.root)} | Nối: ${esc(w.medAnatomy.combining)} | Hậu tố: ${esc(w.medAnatomy.suffix)}</div>`:''}
+ <div class="space-y-3 text-sm pt-3">${window.buildMedicalBreakdownHTML?window.buildMedicalBreakdownHTML(w):(hasMed(w)?`<div class="inset p-3 font-mono text-xs text-bad">Tiền tố: ${esc(w.medAnatomy.prefix)} | Gốc: ${esc(w.medAnatomy.root)} | Nối: ${esc(w.medAnatomy.combining)} | Hậu tố: ${esc(w.medAnatomy.suffix)}</div>`:'')}
  <div class="inset p-3"><p>"${esc(w.example)}"</p><p class="text-ok italic text-xs mt-1">${esc(w.exampleTrans)}</p></div>
  ${w.collocations.length?`<p class="font-mono text-xs text-ok">${esc(w.collocations.join(', '))}</p>`:''}
  <div class="inset p-3"><b class="text-pri text-xs">Giải thích</b><p class="text-sm mt-1">${esc(w.explanation)}</p></div>
@@ -357,8 +354,14 @@ function saveForm(){const g=id=>$(id).value.trim(),id=g('f-id'),word=g('f-word')
 const resetForm=()=>{$('wf').reset();$('f-id').value=''};
 async function analyze(){const raw=$('ai-in').value.trim();if(!raw)return toast('Hãy nhập từ hoặc đoạn văn.');
  const btn=$('ai-go'),orig=btn.innerHTML,lv=$('ai-lv').value;btn.disabled=true;btn.textContent='AI đang phân tích...';
- try{const res=await ai(`Bạn là giáo viên tiếng Anh. Người dùng nhập: """${raw}"""\nNếu là danh sách từ/cụm từ (cách nhau bằng dấu phẩy hoặc xuống dòng) thì phân tích TỪNG mục (tối đa 12). Nếu là đoạn văn thì chọn 4–6 từ/cụm từ đáng học nhất và lấy ngữ cảnh từ đoạn văn. Nếu là yêu cầu gợi ý từ theo chủ đề thì tự chọn từ phù hợp. Mức câu ví dụ: ${lv==='Auto'?'tự chọn theo độ khó của từ':lv}.\n${rules()}\nTrả về MẢNG JSON, mỗi phần tử là một từ.`,{type:'ARRAY',items:ITEM});
-  let list=JSON.parse(res);if(!Array.isArray(list))list=[list];list=list.filter(x=>x&&x.word).map(cleanDraft);if(!list.length)throw new Error('AI trả về rỗng');
+ try{
+  const fetchForTerms=async(inputStr)=>{
+   const res=await rawAi(`Bạn là giáo viên tiếng Anh. Người dùng nhập: """${inputStr}"""\nNếu là danh sách từ/cụm từ (cách nhau bằng dấu phẩy hoặc xuống dòng) thì phân tích TỪNG mục (tối đa 12). Nếu là đoạn văn thì chọn 4–6 từ/cụm từ đáng học nhất và lấy ngữ cảnh từ đoạn văn. Nếu là yêu cầu gợi ý từ theo chủ đề thì tự chọn từ phù hợp. Mức câu ví dụ: ${lv==='Auto'?'tự chọn theo độ khó của từ':lv}.\n${rules()}\nTrả về MẢNG JSON, mỗi phần tử là một từ.`,{type:'ARRAY',items:ITEM});
+   let parsed=JSON.parse(res);if(!Array.isArray(parsed))parsed=[parsed];
+   return parsed.filter(x=>x&&x.word).map(cleanDraft);
+  };
+  let list=window.LexiCache?await window.LexiCache.analyze(raw,lv,words,fetchForTerms,toast):await fetchForTerms(raw);
+  if(!list||!list.length)throw new Error('AI trả về rỗng');
   S.ext=list;if(list.length===1){$('f-id').value='';fillForm(list[0]);$('ext-box').classList.add('hidden')}else renderExt();toast(`Đã phân tích xong ${list.length} từ.`)}
  catch(e){toast(friendly(e.message))}finally{btn.disabled=false;btn.innerHTML=orig}}
 function renderExt(){$('ext').innerHTML=S.ext.map((d,i)=>`<div class="inset p-3 space-y-1.5 text-xs"><div class="flex justify-between gap-2"><b class="text-sm">${esc(d.word)} <span class="font-mono text-[11px] text-pri">${esc(d.ipa)}</span></b><span class="font-mono px-2 rounded border ${chipCls(CC[d.cefr])}">${d.cefr}</span></div>
@@ -370,7 +373,10 @@ function addWord(d){if(words.some(w=>w.word.toLowerCase()===cleanTerm(d.word).to
 
 /* ===== Tra cứu nhanh & hỏi AI ===== */
 async function lookup(phrase,ctx){hideSel();$('look').innerHTML=`<p class="p-8 text-center text-mute">Đang tra cứu "${esc(phrase)}"...</p>`;open('m-look');
- try{S.draft=cleanDraft(JSON.parse(await ai(`Tra từ/cụm từ "${phrase}" theo đúng nghĩa trong ngữ cảnh: "${String(ctx).slice(0,300)}".\n${rules()}\nTrả về 1 đối tượng JSON.`,ITEM)));renderLook()}
+ try{
+  const fetchOne=async()=>cleanDraft(JSON.parse(await rawAi(`Tra từ/cụm từ "${phrase}" theo đúng nghĩa trong ngữ cảnh: "${String(ctx).slice(0,300)}".\n${rules()}\nTrả về 1 đối tượng JSON.`,ITEM)));
+  S.draft=window.LexiCache?await window.LexiCache.lookup(phrase,ctx,words,fetchOne,toast):await fetchOne();
+  renderLook()}
  catch(e){S.draft=null;$('look').innerHTML=errBox(e)}}
 function renderLook(){const d=S.draft,med=[d.medPrefix,d.medRoot,d.medCombining,d.medSuffix].some(Boolean);
  $('look').innerHTML=`<div class="flex flex-wrap items-center gap-2"><h3 class="text-xl font-bold">${esc(d.word)}</h3><span class="text-pri font-mono text-xs">${esc(d.ipa)}</span><button class="text-pri" data-a="speak" data-v="${esc(d.word)}" aria-label="Nghe"><i class="ph-fill ph-speaker-high"></i></button></div>
@@ -390,7 +396,9 @@ async function askAI(q){q=String(q||'').trim();if(!q||!S.ask)return;const log=$(
  const add=(c,h)=>{const d=document.createElement('div');d.className='p-2.5 rounded-xl text-sm '+c;d.innerHTML=h;log.appendChild(d);log.scrollTop=log.scrollHeight;return d};
  add('bg-solid/20',esc(q));const w=add('inset text-mute','AI đang trả lời...');
  const hist=S.ask.hist.map(h=>`${h[0]==='u'?'Người học':'Gia sư'}: ${h[1]}`).join('\n');
- try{const a=await ai(`Bạn là gia sư tiếng Anh thân thiện cho người Việt. Trả lời bằng tiếng Việt, rõ ràng, đúng trọng tâm, ví dụ tiếng Anh kèm dịch; có thể dùng **in đậm**.\nĐoạn người học hỏi: "${S.ask.phrase}"\nCâu/ngữ cảnh: "${S.ask.ctx}"\n${hist?'Hội thoại trước:\n'+hist+'\n':''}Câu hỏi mới: ${q}`);
+ try{
+  const fetchAns=()=>rawAi(`Bạn là gia sư tiếng Anh thân thiện cho người Việt. Trả lời bằng tiếng Việt, rõ ràng, đúng trọng tâm, ví dụ tiếng Anh kèm dịch; có thể dùng **in đậm**.\nĐoạn người học hỏi: "${S.ask.phrase}"\nCâu/ngữ cảnh: "${S.ask.ctx}"\n${hist?'Hội thoại trước:\n'+hist+'\n':''}Câu hỏi mới: ${q}`);
+  const a=window.LexiCache?await window.LexiCache.ask(S.ask.phrase,S.ask.ctx,q,S.ask.hist,fetchAns,toast):await fetchAns();
   S.ask.hist.push(['u',q],['a',a]);w.className='p-2.5 rounded-xl text-sm inset leading-relaxed';w.innerHTML=esc(a).replace(/^\s*\*\s+/gm,'• ').replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/\n/g,'<br>')}
  catch(e){w.className='p-2.5 rounded-xl text-sm inset';w.innerHTML=errBox(e)}}
 
@@ -438,6 +446,7 @@ function renderQuiz(){const q=S.quiz;if(!q)return;const w=q.w,m=mInfo(w.mastery)
   :`<div class="grid sm:grid-cols-2 gap-2.5">${q.opts.map(o=>`<button ${q.done?'disabled':''} data-a="pick" data-v="${esc(o)}" class="btn !p-3.5 !text-sm !justify-start ${optCls(o)}">${esc(o)}</button>`).join('')}</div>`}
  ${q.done?`<div class="pt-4 border-t border-line/60 space-y-4"><div class="inset p-4 flex justify-between items-center ${q.ok?'border-ok/40':'border-bad/40'}"><div><b class="${q.ok?'text-ok':'text-bad'}">${q.ok?'Chính xác! (+20%)':'Chưa đúng (−20%)'}</b>
   <p class="text-xs mt-1">${esc(w.word)} ${esc(w.ipa)} <button class="text-pri underline" data-a="speak" data-v="${esc(w.word)}">Nghe</button></p></div><button class="btn btn-pri" data-a="next">Tiếp theo</button></div>
+  ${window.buildMedicalBreakdownHTML?window.buildMedicalBreakdownHTML(w):''}
   <div class="inset p-4 space-y-2"><div class="flex justify-between items-center"><b class="text-xs text-pri">Luyện đọc & chấm điểm</b><button id="mic" class="btn btn-bad" data-a="mic"><i class="ph-fill ph-microphone"></i>Bấm đọc</button></div>
    <div id="pron" class="text-xs hidden"></div>
    <div class="space-y-1.5 pt-1"><p class="text-[11px] text-mute">Cách 2 (dùng được ở mọi nơi): bấm vào ô dưới, bấm mic trên bàn phím rồi đọc câu. Từ đọc đúng sẽ hiện xanh ngay.</p>
@@ -513,11 +522,11 @@ function applySort(){let n=0;document.querySelectorAll('[data-sort]').forEach(ck
  save();renderManager();renderVault();$('sort-out').innerHTML=`<span class="text-ok">Đã chuyển ${n} từ sang chủ đề phù hợp.</span>`}
 
 /* ===== Cài đặt & sao lưu ===== */
-async function testAI(){const out=$('test-out'),k=$('key').value.trim();out.textContent='Đang kiểm tra...';if(k){ls.set(K.KEY,k);aiModels=null}
- try{await ai('Trả lời đúng 1 từ: OK');out.innerHTML=`<span class="text-ok">Kết nối AI thành công (model: ${esc(aiUsed)}). ${storageOK?'Khóa được lưu trong trình duyệt.':'Trang này chặn lưu trữ nên khóa chỉ nhớ đến khi tải lại.'}</span>`}
- catch(e){out.innerHTML=errBox(e)+(aiKey()?'':'<p class="mt-1 text-mute">Chưa có khóa API: dán khóa ở ô trên rồi bấm Lưu key.</p>')}}
-function exportData(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({words,mistakes,topics},null,2)],{type:'application/json'}));a.download='LexiContext_Backup.json';a.click()}
-function importData(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const p=JSON.parse(r.result);if(!Array.isArray(p.words))throw 0;words=p.words.map(norm);mistakes=p.mistakes||[];if(Array.isArray(p.topics)&&p.topics.length)topics=p.topics;save();renderVault();close('m-set');toast('Khôi phục thành công.')}catch(e){toast('File JSON không hợp lệ.')}};r.readAsText(f)}
+async function testAI(){const out=$('test-out');out.textContent='Đang kiểm tra...';
+ try{await rawAi('Trả lời đúng 1 từ: OK');out.innerHTML=`<span class="text-ok">Kết nối AI thành công (model: ${esc(aiUsed)}).</span>`}
+ catch(e){out.innerHTML=errBox(e)}}
+function exportData(){const a=document.createElement('a');const payload={words,mistakes,topics};if(window.LexiCache)payload.aiCache=window.LexiCache.exportData();a.href=URL.createObjectURL(new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}));a.download='LexiContext_Backup.json';a.click()}
+function importData(f){if(!f)return;const r=new FileReader();r.onload=()=>{try{const p=JSON.parse(r.result);if(!Array.isArray(p.words))throw 0;words=p.words.map(norm);mistakes=p.mistakes||[];if(Array.isArray(p.topics)&&p.topics.length)topics=p.topics;if(p.aiCache&&window.LexiCache)window.LexiCache.importData(p.aiCache);save();renderVault();close('m-set');toast('Khôi phục thành công.')}catch(e){toast('File JSON không hợp lệ.')}};r.readAsText(f)}
 
 /* ===== Điều khiển: một bộ lắng nghe cho mọi nút ===== */
 const ACT={
@@ -540,7 +549,7 @@ const ACT={
  'mist-all':()=>{if(mistakes.length)ACT['mist-retry'](mistakes[0].id)},
  't-new':newTopic,'t-save':v=>saveTopic(+v),'t-del':v=>delTopic(+v),'mv-all':()=>{words.filter(w=>w.topic===$('mv-from').value).forEach(w=>S.mv.add(w.id));renderMove()},'mv-go':moveGo,
  sort:aiSort,'sort-cancel':()=>$('sort-out').innerHTML='','sort-apply':applySort,
- 'key-save':()=>{const k=$('key').value.trim();ls.set(K.KEY,k);aiModels=null;toast(k?'Đã lưu API key.':'Đã xóa API key.')},'key-test':testAI,export:exportData,
+ 'key-test':testAI,export:exportData,sync:()=>{if(window.openSyncModal)window.openSyncModal()},
  reset:()=>{if(confirm('Khôi phục dữ liệu mẫu? Toàn bộ từ vựng hiện tại sẽ bị thay thế.')){words=DEFAULT_WORDS.map(norm);mistakes=[];topics=clone(DEFAULT_TOPICS);save();renderVault();close('m-set');toast('Đã khôi phục dữ liệu mẫu.')}}};
 document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(el&&ACT[el.dataset.a])ACT[el.dataset.a](el.dataset.v,el);else if(e.target.classList.contains('modal'))e.target.classList.remove('open')});
 document.addEventListener('change',e=>{const t=e.target;
@@ -554,21 +563,14 @@ $('wf').addEventListener('submit',e=>{e.preventDefault();saveForm()});
 /* ===== Khởi động ===== */
 setTheme(document.documentElement.classList.contains('dark')?'dark':'light',false);load();tab('vault');
 if(!storageOK){const b=document.createElement('button');b.className='fixed bottom-2 left-2 right-2 z-50 p-3 rounded-xl bg-warn text-app text-xs font-semibold';
- b.textContent='Trang này chặn lưu trữ: từ vựng và khóa API sẽ mất khi tải lại. Hãy xuất dữ liệu thường xuyên (Cài đặt → Xuất dữ liệu). Chạm để ẩn.';b.onclick=()=>b.remove();document.body.appendChild(b)}
+ b.textContent='Trang này chặn lưu trữ: từ vựng sẽ mất khi tải lại. Hãy xuất dữ liệu thường xuyên (Cài đặt → Xuất dữ liệu). Chạm để ẩn.';b.onclick=()=>b.remove();document.body.appendChild(b)}
 </script>
-<script src="./cache.js?v=6"></script>
-<script src="./academy-core.js?v=1"></script>
-<script src="./academy-listening.js?v=1"></script>
-<script src="./academy-writing.js?v=1"></script>
-<script src="./academy-speaking.js?v=1"></script>
-<script src="./academy-grammar.js?v=1"></script>
-<script src="./academy-daily.js?v=1"></script>
-<script>
-/* PWA: chỉ nối với 2 tệp manifest.json và sw.js do bạn tạo riêng */
-(function(){
- if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
- if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});
-})();
-</script>
+<script src="./cache.js?v=7"></script>
+<script src="./academy-core.js?v=2"></script>
+<script src="./academy-listening.js?v=2"></script>
+<script src="./academy-writing.js?v=3"></script>
+<script src="./academy-speaking.js?v=2"></script>
+<script src="./academy-grammar.js?v=2"></script>
+<script src="./academy-daily.js?v=2"></script>
 </body>
 </html>
