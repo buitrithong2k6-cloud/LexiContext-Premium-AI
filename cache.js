@@ -29,12 +29,61 @@
   const memCache = new Map();
   const inFlight = new Map();
   const cambridgeMp3Cache = new Map();
+  const sentenceAudioCache = new Map();
+  const sentenceInFlight = new Map();
   let dbPromise = null;
 
-  // Dùng 1 đối tượng Audio duy nhất giúp iPadOS/iOS Safari luôn phát âm thanh ngay khi chạm
+  // Dùng 1 đối tượng Audio duy nhất kèm referrerPolicy="no-referrer" giúp iPadOS/iOS Safari luôn phát âm thanh ngay khi chạm
   const sharedAudio = typeof Audio !== 'undefined' ? new Audio() : null;
   if (sharedAudio) {
     sharedAudio.preload = 'auto';
+    try {
+      sharedAudio.referrerPolicy = 'no-referrer';
+      sharedAudio.setAttribute('referrerpolicy', 'no-referrer');
+      sharedAudio.setAttribute('playsinline', 'true');
+      sharedAudio.setAttribute('webkit-playsinline', 'true');
+    } catch (e) {}
+  }
+
+  // Mở khóa kênh âm thanh Safari trên iPad/iOS ngay ở cú chạm đầu tiên (Synchronous User Gesture Unlock)
+  let iosAudioUnlocked = false;
+  const SILENT_WAV_URI =
+    'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
+  function unlockIOSAudio() {
+    if (iosAudioUnlocked || !sharedAudio) return;
+    iosAudioUnlocked = true;
+    try {
+      if (sharedAudio.paused && !sharedAudio.src) {
+        sharedAudio.muted = true;
+        sharedAudio.src = SILENT_WAV_URI;
+        const p = sharedAudio.play();
+        if (p && typeof p.then === 'function') {
+          p.then(() => {
+            sharedAudio.pause();
+            sharedAudio.muted = false;
+            sharedAudio.currentTime = 0;
+          }).catch(() => {
+            sharedAudio.muted = false;
+          });
+        } else {
+          sharedAudio.muted = false;
+        }
+      }
+      if ('speechSynthesis' in global && typeof SpeechSynthesisUtterance !== 'undefined') {
+        const u = new SpeechSynthesisUtterance('');
+        u.volume = 0;
+        speechSynthesis.speak(u);
+      }
+    } catch (e) {
+      if (sharedAudio) sharedAudio.muted = false;
+    }
+  }
+
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    ['touchstart', 'pointerdown', 'click'].forEach((evt) => {
+      document.addEventListener(evt, unlockIOSAudio, { once: true, passive: true, capture: true });
+    });
   }
 
   const SPEAKER_SVG =
@@ -72,6 +121,9 @@
     try {
       if (typeof global.toast === 'function') global.toast(msg);
       else if (typeof window.toast === 'function') window.toast(msg);
+      else if (global.LexiAcademy && typeof global.LexiAcademy.notify === 'function') {
+        global.LexiAcademy.notify(msg);
+      }
     } catch (e) {}
   }
 
@@ -83,7 +135,7 @@
   }
 
   /* ==========================================================================
-   * 1. HỆ THỐNG ÂM THANH CHUẨN US (FLUENT CHUNKING & SHADOWING 1.5S PAUSE)
+   * 1. HỆ THỐNG ÂM THANH ĐA TẦNG CHUẨN US (NEURAL TTS + CHUNKING & SHADOWING 1.5S)
    * ========================================================================== */
 
   let activePlaybackToken = 0;
@@ -145,7 +197,7 @@
       }
     });
 
-    // Bước 2: Với các mệnh đề dài hơn 6 từ, tách tiếp tại ranh giới nhịp thở tự nhiên
+    // Bước 2: Với các mệnh đề dài hơn 7 từ, tách tiếp tại ranh giới nhịp thở tự nhiên
     const finalChunks = [];
     const breathSplitRe =
       /(?<!\b(?:going|used|want|wants|wanted|need|needs|needed|have|has|had|ought|able|glad|happy|great|nice|pleased|ready|trying|try|plan|plans|hope|hopes|decide|decided))\s+(?=(?:to\s+[a-z]{2,}|who\s+|which\s+|that\s+|because\s+|although\s+|while\s+|when\s+|if\s+|and\s+I\s+|and\s+have\s+|and\s+start\s+|and\s+go\s+|and\s+studies\s+|and\s+plays\s+|and\s+suggest\s+|but\s+also\s+|but\s+|or\s+give\s+|or\s+watch\s+|or\s+listening\s+|about\s+my\s+|with\s+vegetables\s+|instead\s+of\s+|rather\s+than\s+|such\s+as\s+|as\s+well\s+as\s+|as\s+soon\s+as\s+|so\s+that\s+|in\s+order\s+to\s+))/i;
@@ -211,16 +263,146 @@
       .trim();
   }
 
-  function buildUSAudioUrl(chunkText) {
-    const spoken = normalizeChunkForUSAudio(chunkText);
+  // URL từ điển cho từ đơn (1 từ)
+  function buildSingleWordUSUrl(wordText) {
+    const spoken = normalizeChunkForUSAudio(wordText);
     return (
       'https://dict.youdao.com/dictvoice?audio=' +
-      encodeURIComponent(spoken.slice(0, 180)) +
+      encodeURIComponent(spoken.slice(0, 120)) +
       '&type=2'
     );
   }
 
-  // Dự phòng chỉ khi hoàn toàn mất kết nối mạng
+  // Đóng gói PCM 24kHz 16-bit mono (base64) từ Gemini TTS thành Blob URL WAV chuẩn chạy trên Safari iPad
+  function pcmBase64ToWavBlobUrl(base64Pcm) {
+    const binStr = atob(base64Pcm);
+    const pcmLen = binStr.length;
+    const wavBuffer = new ArrayBuffer(44 + pcmLen);
+    const view = new DataView(wavBuffer);
+    const writeStr = (offset, str) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+    const sampleRate = 24000;
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + pcmLen, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, pcmLen, true);
+
+    const bytes = new Uint8Array(wavBuffer, 44);
+    for (let i = 0; i < pcmLen; i++) {
+      bytes[i] = binStr.charCodeAt(i);
+    }
+    const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+    return URL.createObjectURL(blob);
+  }
+
+  // Tải trước giọng AI Neural TTS (Gemini 2.5 Flash TTS - Kore US) vào bộ nhớ đệm nếu có kết nối
+  function prefetchGeminiNeuralChunk(chunkText) {
+    const key = normKey(chunkText);
+    if (!key || sentenceAudioCache.has(key) || sentenceInFlight.has(key)) return;
+
+    const job = (async () => {
+      try {
+        // 1. Thử gọi qua Backend /api/tts (khi chạy trên AI Studio / Cloud Run)
+        const isStaticGithubPages =
+          typeof location !== 'undefined' && /\.github\.io$/i.test(location.hostname || '');
+        if (!isStaticGithubPages) {
+          const resp = await fetch('/api/tts?text=' + encodeURIComponent(chunkText));
+          if (resp.ok) {
+            const cType = resp.headers.get('content-type') || '';
+            if (cType.includes('audio')) {
+              const blob = await resp.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              sentenceAudioCache.set(key, blobUrl);
+              return blobUrl;
+            }
+          }
+        }
+
+        // 2. Nếu chạy trên GitHub Pages (iPad) và người dùng có cấu hình Gemini Key trong máy
+        const savedApiKey =
+          typeof localStorage !== 'undefined'
+            ? (localStorage.getItem('lexicontext_gemini_key_v1') || '').trim()
+            : '';
+        if (savedApiKey) {
+          const gUrl =
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=' +
+            encodeURIComponent(savedApiKey);
+          const gResp = await fetch(gUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Read naturally in clear American English: ' + chunkText }] }],
+              generationConfig: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: 'Kore' }
+                  }
+                }
+              }
+            })
+          });
+          if (gResp.ok) {
+            const gJson = await gResp.json();
+            const b64 = gJson?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            if (b64) {
+              const wavUrl = pcmBase64ToWavBlobUrl(b64);
+              sentenceAudioCache.set(key, wavUrl);
+              return wavUrl;
+            }
+          }
+        }
+      } catch (e) {
+        // Bỏ qua lỗi mạng ngầm, dùng luồng Neural US Stream tức thì
+      } finally {
+        sentenceInFlight.delete(key);
+      }
+      return null;
+    })();
+
+    sentenceInFlight.set(key, job);
+  }
+
+  // Danh sách các luồng Neural English trả về HTTP 200 (audio/mpeg) cho cụm từ & câu dài trên cả iPad & Web
+  function buildSentenceStreamCandidates(chunkText) {
+    const key = normKey(chunkText);
+    const spoken = normalizeChunkForUSAudio(chunkText).slice(0, 200);
+    const enc = encodeURIComponent(spoken);
+    const candidates = [];
+
+    if (sentenceAudioCache.has(key)) {
+      candidates.push(sentenceAudioCache.get(key));
+    }
+
+    // Luồng 1: Neural English Stream (trả về HTTP 200 audio/mpeg cho mọi câu dài trên Safari iPad & GitHub Pages)
+    candidates.push('https://fanyi.baidu.com/gettts?lan=en&text=' + enc + '&spd=5&source=web');
+
+    // Luồng 2: Google US Stream (kết hợp referrerPolicy="no-referrer" trên sharedAudio)
+    candidates.push(
+      'https://translate.googleapis.com/translate_tts?ie=UTF-8&q=' +
+        enc +
+        '&tl=en-US&client=tw-ob'
+    );
+
+    // Nếu cụm cực ngắn (1-2 từ), thêm từ điển US làm dự phòng
+    if (spoken.split(/\s+/).length <= 2) {
+      candidates.push('https://dict.youdao.com/dictvoice?audio=' + enc + '&type=2');
+    }
+
+    return candidates;
+  }
+
+  // Dự phòng cuối cùng khi thiết bị mất mạng hoàn toàn
   function speakFallbackUS(text, rate = 0.92, onEnd) {
     if (!('speechSynthesis' in global) || typeof SpeechSynthesisUtterance === 'undefined') {
       if (typeof onEnd === 'function') onEnd();
@@ -236,15 +418,19 @@
         voices.find(
           (v) =>
             /^en[-_]US/i.test(v.lang) &&
-            /Samantha|Alex|Ava|Allison|Natural|Enhanced|Premium/i.test(v.name)
+            /Samantha|Ava|Allison|Alex|Natural|Enhanced|Premium/i.test(v.name)
         ) ||
         voices.find((v) => /^en[-_]US/i.test(v.lang)) ||
         voices.find((v) => /^en/i.test(v.lang));
       if (preferred) u.voice = preferred;
-      if (typeof onEnd === 'function') {
-        u.onend = () => onEnd();
-        u.onerror = () => onEnd();
-      }
+      let doneCalled = false;
+      const finishOnce = () => {
+        if (doneCalled) return;
+        doneCalled = true;
+        if (typeof onEnd === 'function') onEnd();
+      };
+      u.onend = finishOnce;
+      u.onerror = finishOnce;
       speechSynthesis.resume();
       speechSynthesis.speak(u);
     } catch (e) {
@@ -252,57 +438,71 @@
     }
   }
 
-  // Phát 1 cụm đơn lẻ bằng chuẩn US (dùng khi bấm vào từng thẻ cụm trong khung Shadowing)
-  function playSingleChunkUS(chunkText, callbacks = {}) {
-    const text = String(chunkText || '').trim();
-    if (!text) return;
-    stopAudioPlayback();
-    const myToken = activePlaybackToken;
-    const url = buildUSAudioUrl(text);
-
-    if (typeof callbacks.onStart === 'function') callbacks.onStart();
-
-    if (!sharedAudio) {
-      speakFallbackUS(text, 0.92, () => {
-        if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
-          callbacks.onFinish();
-        }
+  // Phát 1 cụm qua danh sách URL ứng viên (nếu luồng 1 lỗi mạng thì tự chuyển sang luồng 2 ngay lập tức)
+  function playAudioCandidateList(candidates, fallbackText, fallbackRate, myToken, onDone) {
+    if (!sharedAudio || !candidates || !candidates.length) {
+      speakFallbackUS(fallbackText, fallbackRate, () => {
+        if (myToken === activePlaybackToken && typeof onDone === 'function') onDone();
       });
       return;
     }
 
-    try {
-      sharedAudio.src = url;
-      sharedAudio.onended = function () {
-        if (myToken !== activePlaybackToken) return;
-        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
-      };
-      sharedAudio.onerror = function () {
-        if (myToken !== activePlaybackToken) return;
-        speakFallbackUS(text, 0.92, () => {
-          if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
-            callbacks.onFinish();
-          }
+    let cIdx = 0;
+    const tryPlayCurrent = () => {
+      if (myToken !== activePlaybackToken) return;
+      if (cIdx >= candidates.length) {
+        speakFallbackUS(fallbackText, fallbackRate, () => {
+          if (myToken === activePlaybackToken && typeof onDone === 'function') onDone();
         });
-      };
-      const p = sharedAudio.play();
-      if (p && typeof p.catch === 'function') {
-        p.catch(() => {
-          if (myToken !== activePlaybackToken) return;
-          speakFallbackUS(text, 0.92, () => {
-            if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
-              callbacks.onFinish();
-            }
-          });
-        });
+        return;
       }
-    } catch (e) {
-      speakFallbackUS(text, 0.92, () => {
-        if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
-          callbacks.onFinish();
+
+      const url = candidates[cIdx++];
+      try {
+        sharedAudio.muted = false;
+        sharedAudio.onended = function () {
+          if (myToken !== activePlaybackToken) return;
+          if (typeof onDone === 'function') onDone();
+        };
+        sharedAudio.onerror = function () {
+          if (myToken !== activePlaybackToken) return;
+          tryPlayCurrent();
+        };
+        sharedAudio.src = url;
+        const p = sharedAudio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            if (myToken !== activePlaybackToken) return;
+            tryPlayCurrent();
+          });
         }
-      });
-    }
+      } catch (e) {
+        tryPlayCurrent();
+      }
+    };
+
+    tryPlayCurrent();
+  }
+
+  // Phát 1 cụm đơn lẻ bằng chuẩn US (dùng khi bấm vào từng thẻ cụm trong khung Shadowing)
+  function playSingleChunkUS(chunkText, callbacks = {}) {
+    const text = String(chunkText || '').trim();
+    if (!text) return;
+    unlockIOSAudio();
+    stopAudioPlayback();
+    const myToken = activePlaybackToken;
+
+    if (typeof callbacks.onStart === 'function') callbacks.onStart();
+
+    prefetchGeminiNeuralChunk(text);
+    const candidates = isSentenceText(text)
+      ? buildSentenceStreamCandidates(text)
+      : [buildSingleWordUSUrl(text), ...buildSentenceStreamCandidates(text)];
+
+    playAudioCandidateList(candidates, text, 0.92, myToken, () => {
+      if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
+      if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+    });
   }
 
   // Phát từ đơn hoặc câu dài bằng kỹ thuật Chunking & Pausing (Chuẩn US duy nhất)
@@ -312,6 +512,7 @@
     const text = String(rawText || '').trim();
     if (!text) return;
 
+    unlockIOSAudio();
     stopAudioPlayback();
     const myToken = activePlaybackToken;
     const isSentence = isSentenceText(text);
@@ -320,50 +521,33 @@
     if (!isSentence) {
       const cleanWord = normKey(text);
       const cachedMp3 = cambridgeMp3Cache.get(cleanWord);
-      const dictStreamUrl = buildUSAudioUrl(text);
-      const primaryUrl = cachedMp3 && cachedMp3.us ? cachedMp3.us : dictStreamUrl;
+      const dictStreamUrl = buildSingleWordUSUrl(text);
+      const wordCandidates = [];
+      if (cachedMp3 && cachedMp3.us) wordCandidates.push(cachedMp3.us);
+      wordCandidates.push(dictStreamUrl);
+      wordCandidates.push(...buildSentenceStreamCandidates(text));
 
       if (!cleanWord.includes(' ')) prefetchDictionaryMp3(cleanWord);
 
-      if (!sharedAudio) {
-        speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
-        return;
-      }
-
-      try {
-        sharedAudio.src = primaryUrl;
-        sharedAudio.onerror = function () {
-          if (myToken !== activePlaybackToken) return;
-          if (sharedAudio.src !== dictStreamUrl) {
-            sharedAudio.src = dictStreamUrl;
-            sharedAudio.onerror = function () {
-              speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
-            };
-            sharedAudio.play().catch(() => speakFallbackUS(text, isShadowing ? 0.85 : 0.94));
-          } else {
-            speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
-          }
-        };
-        const playPromise = sharedAudio.play();
-        if (playPromise && typeof playPromise.catch === 'function') {
-          playPromise.catch(() => speakFallbackUS(text, isShadowing ? 0.85 : 0.94));
-        }
-      } catch (e) {
-        speakFallbackUS(text, isShadowing ? 0.85 : 0.94);
-      }
+      playAudioCandidateList(wordCandidates, text, isShadowing ? 0.85 : 0.94, myToken, () => {
+        if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
+        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+      });
       return;
     }
 
     // 2. Cụm từ & Câu dài: Áp dụng kỹ thuật Breath-Group Chunking & Preloaded Queue (Chuẩn US)
     const chunks = splitIntoBreathChunks(text);
-    const urls = chunks.map((c) => buildUSAudioUrl(c));
 
     // Nạp trước song song (Parallel Preload) tất cả các cụm vào bộ nhớ đệm trình duyệt để chuyển cụm 0ms delay
-    const preloaders = urls.map((u) => {
+    const preloaders = chunks.map((c) => {
+      prefetchGeminiNeuralChunk(c);
+      const cands = buildSentenceStreamCandidates(c);
       try {
         const a = new Audio();
         a.preload = 'auto';
-        a.src = u;
+        a.referrerPolicy = 'no-referrer';
+        a.src = cands[0];
         a.load();
         return a;
       } catch (e) {
@@ -372,27 +556,47 @@
     });
 
     const pauseMs = isShadowing ? 1500 : 0; // Shadowing dừng 1.5s sau mỗi cụm; Nghe US lưu loát dừng 0ms
+    const hasCustomUI =
+      typeof callbacks.onChunkStart === 'function' ||
+      typeof callbacks.onPauseStart === 'function' ||
+      typeof callbacks.onChunkPause === 'function';
+
+    function triggerComplete() {
+      if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
+      if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+      if (isShadowing && !hasCustomUI) {
+        notify('✓ Hoàn tất lượt luyện Shadowing (dừng 1.5s mỗi cụm)');
+      }
+    }
 
     function playChunkAt(idx) {
       if (myToken !== activePlaybackToken) return;
       if (idx >= chunks.length) {
-        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+        triggerComplete();
         return;
       }
 
       const curChunk = chunks[idx];
-      const curUrl = urls[idx];
+      const candidates = buildSentenceStreamCandidates(curChunk);
 
       if (typeof callbacks.onChunkStart === 'function') {
-        callbacks.onChunkStart(idx, curChunk, chunks.length);
+        callbacks.onChunkStart(idx, chunks.length, curChunk);
+      } else if (isShadowing) {
+        notify(`🔊 Cụm ${idx + 1}/${chunks.length}: "${curChunk}"`);
       }
 
       const advanceNext = () => {
         if (myToken !== activePlaybackToken) return;
         if (idx < chunks.length - 1) {
           if (pauseMs > 0) {
+            if (typeof callbacks.onPauseStart === 'function') {
+              callbacks.onPauseStart(idx, chunks.length, pauseMs, curChunk);
+            }
             if (typeof callbacks.onChunkPause === 'function') {
-              callbacks.onChunkPause(idx, curChunk, chunks.length, pauseMs);
+              callbacks.onChunkPause(idx, chunks.length, pauseMs, curChunk);
+            }
+            if (!hasCustomUI && isShadowing) {
+              notify(`🎙️ Nghỉ 1.5s — Hãy đọc nhại lại: "${curChunk}"`);
             }
             activeShadowTimer = setTimeout(() => {
               playChunkAt(idx + 1);
@@ -402,41 +606,34 @@
             playChunkAt(idx + 1);
           }
         } else {
-          if (pauseMs > 0 && typeof callbacks.onChunkPause === 'function') {
-            callbacks.onChunkPause(idx, curChunk, chunks.length, pauseMs);
+          if (pauseMs > 0) {
+            if (typeof callbacks.onPauseStart === 'function') {
+              callbacks.onPauseStart(idx, chunks.length, pauseMs, curChunk);
+            }
+            if (typeof callbacks.onChunkPause === 'function') {
+              callbacks.onChunkPause(idx, chunks.length, pauseMs, curChunk);
+            }
+            if (!hasCustomUI && isShadowing) {
+              notify(`🎙️ Nghỉ 1.5s — Hãy đọc nhại lại cụm cuối: "${curChunk}"`);
+            }
             activeShadowTimer = setTimeout(() => {
-              if (myToken === activePlaybackToken && typeof callbacks.onFinish === 'function') {
-                callbacks.onFinish();
+              if (myToken === activePlaybackToken) {
+                triggerComplete();
               }
             }, pauseMs);
-          } else if (typeof callbacks.onFinish === 'function') {
-            callbacks.onFinish();
+          } else {
+            triggerComplete();
           }
         }
       };
 
-      if (!sharedAudio) {
-        speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
-        return;
-      }
-
-      try {
-        sharedAudio.onended = advanceNext;
-        sharedAudio.onerror = function () {
-          if (myToken !== activePlaybackToken) return;
-          speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
-        };
-        sharedAudio.src = curUrl;
-        const p = sharedAudio.play();
-        if (p && typeof p.catch === 'function') {
-          p.catch(() => {
-            if (myToken !== activePlaybackToken) return;
-            speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
-          });
-        }
-      } catch (e) {
-        speakFallbackUS(curChunk, isShadowing ? 0.86 : 0.95, advanceNext);
-      }
+      playAudioCandidateList(
+        candidates,
+        curChunk,
+        isShadowing ? 0.86 : 0.95,
+        myToken,
+        advanceNext
+      );
     }
 
     // Giữ tham chiếu preloaders trong suốt phiên đọc để trình duyệt không thu hồi sớm
@@ -486,6 +683,91 @@
     });
   }
 
+  function attachInlineShadowBar(btn, sentenceText) {
+    const hostRow = btn.parentElement;
+    if (!hostRow || !hostRow.parentElement) return null;
+    const container = hostRow.parentElement;
+    let bar = container.querySelector('.lexi-inline-shadow-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className =
+        'lexi-inline-shadow-bar mt-2 p-2.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2 text-xs';
+      container.appendChild(bar);
+    }
+
+    const chunks = splitIntoBreathChunks(sentenceText);
+    bar.innerHTML = `
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-1.5">
+        <span class="font-bold text-amber-400">🎯 Shadowing tách cụm (Chuẩn US · Dừng 1.5s)</span>
+        <span data-inline-shadow-status class="font-mono text-[11px] text-mute"></span>
+      </div>
+      <div data-inline-shadow-chunks class="flex flex-wrap items-center gap-1.5">
+        ${chunks
+          .map(
+            (c, i) => `
+          <button type="button" data-inline-chunk-idx="${i}" class="px-2 py-1 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 transition font-mono text-xs text-left">
+            <b class="text-amber-400 mr-1">${i + 1}.</b>${escHTML(c)}
+          </button>
+          ${i < chunks.length - 1 ? '<span class="text-mute font-mono text-xs">➔</span>' : ''}
+        `
+          )
+          .join('')}
+      </div>
+    `;
+
+    const statusEl = bar.querySelector('[data-inline-shadow-status]');
+    const resetHighlight = () => {
+      bar.querySelectorAll('[data-inline-chunk-idx]').forEach((b) => {
+        b.className =
+          'px-2 py-1 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 transition font-mono text-xs text-left';
+      });
+    };
+
+    bar.querySelectorAll('[data-inline-chunk-idx]').forEach((b) => {
+      b.onclick = (ev) => {
+        ev.stopPropagation();
+        const idx = Number(b.getAttribute('data-inline-chunk-idx'));
+        const chunkTxt = chunks[idx];
+        if (!chunkTxt) return;
+        resetHighlight();
+        b.className =
+          'px-2 py-1 rounded-lg border border-sky-400 bg-sky-500/20 text-sky-200 ring-2 ring-sky-400/60 transition font-mono text-xs text-left font-bold';
+        if (statusEl) statusEl.textContent = `🔊 Cụm ${idx + 1}/${chunks.length} (US)...`;
+        playSingleChunkUS(chunkTxt, {
+          onComplete: () => {
+            resetHighlight();
+            if (statusEl) statusEl.textContent = `✓ Đã đọc cụm ${idx + 1}/${chunks.length}`;
+          }
+        });
+      };
+    });
+
+    return {
+      onChunkStart: (idx, total) => {
+        resetHighlight();
+        const activeBtn = bar.querySelector(`[data-inline-chunk-idx="${idx}"]`);
+        if (activeBtn) {
+          activeBtn.className =
+            'px-2 py-1 rounded-lg border border-sky-400 bg-sky-500/25 text-sky-200 ring-2 ring-sky-400/70 transition font-mono text-xs text-left font-bold';
+        }
+        if (statusEl) statusEl.textContent = `🔊 Đang đọc cụm ${idx + 1}/${total} (US)...`;
+      },
+      onPauseStart: (idx, total) => {
+        resetHighlight();
+        const activeBtn = bar.querySelector(`[data-inline-chunk-idx="${idx}"]`);
+        if (activeBtn) {
+          activeBtn.className =
+            'px-2 py-1 rounded-lg border border-emerald-400 bg-emerald-500/25 text-emerald-200 ring-2 ring-emerald-400/70 transition font-mono text-xs text-left font-bold';
+        }
+        if (statusEl) statusEl.textContent = `🎙️ Dừng 1.5s — Nhại lại cụm ${idx + 1}/${total}...`;
+      },
+      onComplete: () => {
+        resetHighlight();
+        if (statusEl) statusEl.textContent = '✓ Hoàn tất (Bấm từng cụm để nghe lại)';
+      }
+    };
+  }
+
   document.addEventListener(
     'click',
     function (e) {
@@ -508,7 +790,11 @@
       }
 
       if (textToSpeak) {
-        playCambridgeAudio(textToSpeak, 'us', isShadow);
+        let cb = {};
+        if (isShadow && isSentenceText(textToSpeak)) {
+          cb = attachInlineShadowBar(btn, textToSpeak) || {};
+        }
+        playCambridgeAudio(textToSpeak, 'us', isShadow, cb);
       } else {
         notify('Hãy nhập từ vựng trước khi nghe.');
       }
