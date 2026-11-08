@@ -260,17 +260,37 @@ function load(){try{const m=JSON.parse(ls.get(K.ALL)||'null'),l=JSON.parse(ls.ge
  words=(src.words&&src.words.length?src.words:DEFAULT_WORDS).map(norm);mistakes=Array.isArray(src.mistakes)?src.mistakes:[];topics=Array.isArray(src.topics)&&src.topics.length?src.topics:clone(DEFAULT_TOPICS)}
  catch(e){words=DEFAULT_WORDS.map(norm);mistakes=[];topics=clone(DEFAULT_TOPICS)}save()}
 
-/* ===== Gemini: gọi qua Server Proxy kèm Smart Cache ===== */
+/* ===== Gemini: gọi qua Server Proxy (hỗ trợ cả AI Studio & GitHub Pages) kèm Smart Cache ===== */
 let aiUsed='gemini-3.8-flash',onProg=null;
+const AI_ENDPOINTS=['/api/ai','https://ais-pre-cejwq7dx2qvz6dpn3redsu-623504113614.asia-east1.run.app/api/ai','https://ais-dev-cejwq7dx2qvz6dpn3redsu-623504113614.asia-east1.run.app/api/ai'];
 async function rawAi(prompt,schema,fast){
  if(onProg)onProg(fast?'gemini-3.1-flash-lite':'gemini-3.8-flash',1,1);
  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),25000);
  try{
-  const r=await fetch('/api/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,schema,fast}),signal:ctl.signal});
-  const j=await r.json();
-  if(!r.ok)throw new Error(j?.error||('HTTP '+r.status));
-  aiUsed=j.model||'gemini-3.8-flash';
-  return String(j.text||'').replace(/^\s*```(?:json)?\s*|\s*```\s*$/g,'');
+  const eps=/github\.io$/i.test(location.hostname)?AI_ENDPOINTS.slice(1):AI_ENDPOINTS;
+  let lastErr=null;
+  for(const ep of eps){
+   try{
+    const r=await fetch(ep,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,schema,fast}),signal:ctl.signal});
+    if(r.status===404||r.status===405)continue;
+    const j=await r.json();
+    if(!r.ok)throw new Error(j?.error||('HTTP '+r.status));
+    aiUsed=j.model||'gemini-3.8-flash';
+    return String(j.text||'').replace(/^\s*```(?:json)?\s*|\s*```\s*$/g,'');
+   }catch(err){lastErr=err;if(err.name==='AbortError')throw err}
+  }
+  const savedKey=(ls.get(K.KEY)||'').trim();
+  if(savedKey){
+   const mdl='gemini-2.5-flash',body={contents:[{parts:[{text:prompt}]}]};
+   if(schema)body.generationConfig={responseMimeType:'application/json',responseSchema:schema};
+   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${mdl}:generateContent?key=${encodeURIComponent(savedKey)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctl.signal});
+   const j=await r.json();
+   if(!r.ok)throw new Error(j?.error?.message||('HTTP '+r.status));
+   aiUsed=mdl;
+   const txt=(j?.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();
+   return String(txt).replace(/^\s*```(?:json)?\s*|\s*```\s*$/g,'');
+  }
+  throw lastErr||new Error('Không thể kết nối máy chủ AI.');
  }catch(e){
   if(e.name==='AbortError')throw new Error('Quá 25 giây chưa có phản hồi');
   throw e;
