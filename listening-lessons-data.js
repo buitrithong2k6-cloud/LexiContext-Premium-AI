@@ -799,7 +799,7 @@
       topic: 'VSTEP Part 1–2 • Daily Life & Experiences',
       duration: '01:05',
       youtubeId: '',
-      audioUrl: 'https://www.elllo.org/Audio/1ME-B1INT/B1-050-Jill-Clothes.mp3',
+      audioUrl: './audio/elllo-50-jill.mp3',
       vstepQuestions: [
         {
           id: 'q1',
@@ -952,7 +952,7 @@
       topic: 'VSTEP Part 1 • Time Zones & Living Abroad',
       duration: '00:40',
       youtubeId: '',
-      audioUrl: 'https://www.elllo.org/Audio/1ME-A2BEG/A2-004-LESYA-WHAT-TIME-IS-IT-NOW.mp3',
+      audioUrl: './audio/elllo-04-lesya.mp3',
       vstepQuestions: [
         {
           id: 'q1',
