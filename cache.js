@@ -33,11 +33,10 @@
   const sentenceInFlight = new Map();
   let dbPromise = null;
 
-  // Giữ <meta name="referrer" content="strict-origin-when-cross-origin"> cố định toàn thời gian để YouTube <iframe> không bao giờ bị Lỗi 153
-  // Riêng thẻ <audio> bên dưới đã có thuộc tính referrerpolicy="no-referrer" độc lập
+  let pageMetaReferrer = null;
   if (typeof document !== 'undefined' && document.head) {
     try {
-      let pageMetaReferrer = document.querySelector('meta[name="referrer"]');
+      pageMetaReferrer = document.querySelector('meta[name="referrer"]');
       if (!pageMetaReferrer) {
         pageMetaReferrer = document.createElement('meta');
         pageMetaReferrer.name = 'referrer';
@@ -47,8 +46,30 @@
     } catch (e) {}
   }
 
-  function applyAudioReferrerShield(_url) {
-    // Giữ nguyên strict-origin-when-cross-origin trên document để bảo vệ trình phát YouTube đa thiết bị
+  // Đặt chế độ referrer chuẩn khi nhúng <iframe> YouTube
+  function setYouTubeReferrerMode() {
+    try {
+      if (!pageMetaReferrer && typeof document !== 'undefined') {
+        pageMetaReferrer = document.querySelector('meta[name="referrer"]');
+      }
+      if (pageMetaReferrer) {
+        pageMetaReferrer.content = 'strict-origin-when-cross-origin';
+      }
+    } catch (e) {}
+  }
+  global.setYouTubeReferrerMode = setYouTubeReferrerMode;
+
+  // Đặt chế độ no-referrer đồng bộ ngay tại thời điểm gán sharedAudio.src để luồng âm thanh US trả về 200 audio/mpeg trên Safari iPad & GitHub Pages
+  function applyAudioReferrerShield(url) {
+    try {
+      if (!pageMetaReferrer && typeof document !== 'undefined') {
+        pageMetaReferrer = document.querySelector('meta[name="referrer"]');
+      }
+      if (!pageMetaReferrer) return;
+      if (/translate\.googleapis\.com|dict\.youdao\.com/i.test(String(url || ''))) {
+        pageMetaReferrer.content = 'no-referrer';
+      }
+    } catch (e) {}
   }
 
   // Dùng 1 đối tượng Audio duy nhất giúp iPadOS/iOS Safari luôn phát âm thanh xuyên suốt chuỗi cụm câu
@@ -560,52 +581,44 @@
     const text = String(chunkText || '').trim();
     if (!text) return;
     stopAudioPlayback();
-    primeSharedAudioForGesture();
     const myToken = activePlaybackToken;
 
     if (typeof callbacks.onStart === 'function') callbacks.onStart();
 
-    (async () => {
-      if (isSentenceText(text)) {
-        // Chờ tối đa 1.8s để ưu tiên lấy giọng AI Gemini 2.5 Neural US trước khi rơi về MP3 dự phòng
-        await Promise.race([
-          fetchGeminiNeuralChunk(text),
-          new Promise((r) => setTimeout(r, 1800))
-        ]);
-      }
-      if (myToken !== activePlaybackToken) return;
-      const candidates = isSentenceText(text)
-        ? buildSentenceStreamCandidates(text)
-        : [buildSingleWordUSUrl(text), ...buildSentenceStreamCandidates(text)];
+    if (isSentenceText(text)) {
+      fetchGeminiNeuralChunk(text);
+    }
 
-      playAudioCandidateList(candidates, text, 0.92, myToken, () => {
-        if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
-        if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
-      });
-    })();
+    const candidates = isSentenceText(text)
+      ? buildSentenceStreamCandidates(text)
+      : [buildSingleWordUSUrl(text), ...buildSentenceStreamCandidates(text)];
+
+    playAudioCandidateList(candidates, text, 0.92, myToken, () => {
+      if (typeof callbacks.onComplete === 'function') callbacks.onComplete();
+      if (typeof callbacks.onFinish === 'function') callbacks.onFinish();
+    });
   }
 
-  // Phát từ đơn hoặc câu dài (Chuẩn US duy nhất):
-  // - Khi isShadowing = false (🔊 Nghe US): Đọc nguyên câu liền mạch như giao tiếp thật (không cắt vụn thành các cụm nhỏ)
-  // - Khi isShadowing = true (Tách cụm): Chia theo cụm nhịp thở và dừng đúng 1500ms (1.5s) giữa các cụm
+  // Phát từ đơn hoặc câu dài (Chuẩn US duy nhất theo đúng .agent/rules/audio-us-shadowing.md):
+  // - Khi isShadowing = false (🔊 Nghe US): Tách theo cụm nhịp thở (splitIntoBreathChunks) và phát nối tiếp nhau ngay lập tức (0ms delay)
+  // - Khi isShadowing = true (Tách cụm): Tách theo cụm nhịp thở và dừng đúng 1500ms (1.5s) giữa các cụm
   function playCambridgeAudio(rawText, _accent = 'us', isShadowing = false, callbacks = {}) {
     const text = String(rawText || '').trim();
     if (!text) return;
 
     stopAudioPlayback();
-    primeSharedAudioForGesture();
     const myToken = activePlaybackToken;
     const isSentence = isSentenceText(text);
 
-    // 1. Từ đơn (1 từ): Phát chuẩn audio từ điển Cambridge US MP3 / Youdao US
+    // 1. Từ đơn (1 từ): Phát chuẩn audio từ điển Cambridge US MP3 / Google US / Youdao US ngay trong thao tác chạm
     if (!isSentence) {
       const cleanWord = normKey(text);
       const cachedMp3 = cambridgeMp3Cache.get(cleanWord);
       const dictStreamUrl = buildSingleWordUSUrl(text);
       const wordCandidates = [];
       if (cachedMp3 && cachedMp3.us) wordCandidates.push(cachedMp3.us);
-      wordCandidates.push(dictStreamUrl);
       wordCandidates.push(...buildSentenceStreamCandidates(text));
+      wordCandidates.push(dictStreamUrl);
 
       if (!cleanWord.includes(' ')) prefetchDictionaryMp3(cleanWord);
 
@@ -616,24 +629,24 @@
       return;
     }
 
-    // 2. Câu dài:
-    // - Nghe US (isShadowing = false): Giữ nguyên cả câu trọn vẹn để ngữ điệu nối âm tự nhiên 100%
-    // - Tách cụm (isShadowing = true): Tách theo cụm nhịp thở và nghỉ 1.5s giữa các cụm
-    const chunks = isShadowing ? splitIntoBreathChunks(text) : splitIntoFullSentences(text);
+    // 2. Câu dài: Luôn tách theo cụm nhịp thở (splitIntoBreathChunks)
+    // - Nghe US (isShadowing = false): Độ trễ 0ms giữa các cụm (liền mạch tự nhiên, phản hồi tức thì <20ms)
+    // - Tách cụm (isShadowing = true): Nghỉ 1500ms (1.5s) giữa các cụm để nhại theo
+    const chunks = splitIntoBreathChunks(text);
 
-    // Kích hoạt tải song song giọng AI Gemini 2.5 Neural US và MP3 dự phòng
-    const aiPromises = chunks.map((c) => fetchGeminiNeuralChunk(c));
-    const preloaders = chunks.map((c) => {
+    // Nạp nền AI Neural TTS (không chặn luồng phát đồng bộ trên Safari iPad) và preload các cụm tiếp theo
+    chunks.forEach((c) => fetchGeminiNeuralChunk(c));
+    applyAudioReferrerShield('https://translate.googleapis.com/translate_tts');
+    chunks.forEach((c, idx) => {
+      if (idx === 0) return;
       const cands = buildSentenceStreamCandidates(c);
       try {
         const a = new Audio();
         a.preload = 'auto';
+        a.referrerPolicy = 'no-referrer';
         a.src = cands[0];
         a.load();
-        return a;
-      } catch (e) {
-        return null;
-      }
+      } catch (e) {}
     });
 
     const pauseMs = isShadowing ? 1500 : 0;
@@ -716,14 +729,8 @@
       );
     }
 
-    (async () => {
-      if (aiPromises[0]) {
-        await Promise.race([aiPromises[0], new Promise((r) => setTimeout(r, 1800))]);
-      }
-      if (myToken === activePlaybackToken && preloaders.length) {
-        playChunkAt(0);
-      }
-    })();
+    // Phát ngay lập tức cụm đầu tiên trong cùng ngăn xếp sự kiện chạm (0ms delay)
+    playChunkAt(0);
   }
 
   function upgradeSpeakerButtons() {
@@ -2314,7 +2321,7 @@
 
   if (typeof global.fetch === 'function') {
     const origFetch = global.fetch.bind(global);
-    global.fetch = async function (input, init) {
+    const wrappedFetch = async function (input, init) {
       const url = typeof input === 'string' ? input : (input && input.url) || '';
 
       if (
@@ -2419,6 +2426,18 @@
 
       return origFetch(input, init);
     };
+
+    try {
+      global.fetch = wrappedFetch;
+    } catch (assignErr) {
+      try {
+        Object.defineProperty(global, 'fetch', {
+          value: wrappedFetch,
+          configurable: true,
+          writable: true,
+        });
+      } catch (defineErr) {}
+    }
   }
 
   function runAllUpgrades() {
