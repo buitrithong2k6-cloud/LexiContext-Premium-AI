@@ -463,18 +463,343 @@
     countries: { ipa: '/ˈkʌn.triz/', pos: 'n', vi: 'các quốc gia' },
     visit: { ipa: '/ˈvɪz.ɪt/', pos: 'v/n', vi: 'thăm / chuyến thăm' },
     visiting: { ipa: '/ˈvɪz.ɪ.t̬ɪŋ/', pos: 'v', vi: 'đang ghé thăm' },
-    family: { ipa: '/ˈfæm.ə.li/', pos: 'n', vi: 'gia đình' }
+    family: { ipa: '/ˈfæm.ə.li/', pos: 'n', vi: 'gia đình' },
+    buli: { ipa: '/ˈbuː.li/', pos: 'n', vi: 'Buli (tên người dẫn chương trình BBC)' },
+    bully: { ipa: '/ˈbuː.li/', pos: 'n', vi: 'Buli (tên người dẫn chương trình BBC)' },
+    sian: { ipa: '/ʃɑːn/', pos: 'n', vi: 'Sian (tên người dẫn chương trình BBC, đọc là /ʃɑːn/)' },
+    georgie: { ipa: '/ˈdʒɔːr.dʒi/', pos: 'n', vi: 'Georgie (tên người dẫn chương trình BBC)' },
+    tim: { ipa: '/tɪm/', pos: 'n', vi: 'Tim (tên người dẫn chương trình BBC)' },
+    well: { ipa: '/wel/', pos: 'intj/adv', vi: 'à / tốt' },
+    always: { ipa: '/ˈɔːl.weɪz/', pos: 'adv', vi: 'luôn luôn (100%)' },
+    yoghurt: { ipa: '/ˈjoʊ.ɡɚt/', pos: 'n', vi: 'sữa chua' },
+    yogurt: { ipa: '/ˈjoʊ.ɡɚt/', pos: 'n', vi: 'sữa chua' },
+    jogging: { ipa: '/ˈdʒɑː.ɡɪŋ/', pos: 'n', vi: 'chạy bộ thể dục' },
+    sometimes: { ipa: '/ˈsʌm.taɪmz/', pos: 'adv', vi: 'thỉnh thoảng (~50%)' },
+    occasionally: { ipa: '/əˈkeɪ.ʒən.əl.i/', pos: 'adv', vi: 'đôi khi / thỉnh thoảng (~30%)' },
+    film: { ipa: '/fɪlm/', pos: 'n', vi: 'bộ phim' },
+    clothes: { ipa: '/kloʊðz/', pos: 'n', vi: 'quần áo / trang phục' },
+    shopping: { ipa: '/ˈʃɑː.pɪŋ/', pos: 'n', vi: 'việc mua sắm' },
+    hardly: { ipa: '/ˈhɑːrd.li/', pos: 'adv', vi: 'hầu như không (hardly ever: hiếm khi)' },
+    ever: { ipa: '/ˈev.ɚ/', pos: 'adv', vi: 'bao giờ (hardly ever: hầu như chẳng bao giờ)' },
+    skateboarding: { ipa: '/ˈskeɪt.bɔːr.dɪŋ/', pos: 'n', vi: 'môn trượt ván' },
+    never: { ipa: '/ˈnev.ɚ/', pos: 'adv', vi: 'không bao giờ (0%)' },
+    quarter: { ipa: '/ˈkwɔːr.t̬ɚ/', pos: 'n', vi: '15 phút (một phần tư giờ)' },
+    six: { ipa: '/sɪks/', pos: 'num', vi: 'sáu (6)' },
+    eight: { ipa: '/eɪt/', pos: 'num', vi: 'tám (8)' },
+    half: { ipa: '/hæf/', pos: 'n/det', vi: 'rưỡi / một nửa (half past: giờ rưỡi)' },
+    porridge: { ipa: '/ˈpɔːr.ɪdʒ/', pos: 'n', vi: 'cháo yến mạch' },
+    podcast: { ipa: '/ˈpɑːd.kæst/', pos: 'n', vi: 'chương trình âm thanh podcast' },
+    welcome: { ipa: '/ˈwel.kəm/', pos: 'intj/v', vi: 'chào mừng' },
+    real: { ipa: '/ˈriː.əl/', pos: 'adj', vi: 'thực tế / thật' },
+    cook: { ipa: '/kʊk/', pos: 'v/n', vi: 'nấu ăn' },
+    dinner: { ipa: '/ˈdɪn.ɚ/', pos: 'n', vi: 'bữa tối' },
+    play: { ipa: '/pleɪ/', pos: 'v', vi: 'chơi' },
+    video: { ipa: '/ˈvɪd.i.oʊ/', pos: 'n', vi: 'video / trò chơi điện tử' },
+    games: { ipa: '/ɡeɪmz/', pos: 'n', vi: 'các trò chơi' },
+    sea: { ipa: '/siː/', pos: 'n', vi: 'biển' },
+    cereal: { ipa: '/ˈsɪr.i.əl/', pos: 'n', vi: 'ngũ cốc ăn sáng' },
+    read: { ipa: '/riːd/', pos: 'v', vi: 'đọc' },
+    news: { ipa: '/nuːz/', pos: 'n', vi: 'tin tức / thời sự' },
+    train: { ipa: '/treɪn/', pos: 'n', vi: 'tàu hỏa / tàu điện' },
+    exercise: { ipa: '/ˈek.sɚ.saɪz/', pos: 'v/n', vi: 'tập thể dục' },
+    tv: { ipa: '/ˌtiːˈviː/', pos: 'n', vi: 'ti-vi / truyền hình' },
+    gym: { ipa: '/dʒɪm/', pos: 'n', vi: 'phòng tập thể hình (gym)' },
+    toast: { ipa: '/toʊst/', pos: 'n', vi: 'bánh mì nướng' },
+    brush: { ipa: '/brʌʃ/', pos: 'v', vi: 'chải / đánh (răng)' },
+    teeth: { ipa: '/tiːθ/', pos: 'n', vi: 'răng' },
+    book: { ipa: '/bʊk/', pos: 'n', vi: 'cuốn sách' },
+    camping: { ipa: '/ˈkæm.pɪŋ/', pos: 'n', vi: 'cắm trại' },
+    cartoons: { ipa: '/kɑːrˈtuːnz/', pos: 'n', vi: 'phim hoạt hình' }
   };
 
   // Danh sách bài học phân theo trình độ B1 & B2
   const LESSONS_B1 = [
     {
+      id: 'b1-bbc-daily-routine',
+      title: 'BBC Learning English — Talk About Your Habits (Episode 12)',
+      source: 'BBC Learning English Video (Giọng người thật)',
+      topic: 'VSTEP Part 1–2 • Daily Routine & Adverbs of Frequency',
+      duration: '03:25',
+      youtubeId: 'gCs4knrlnD4',
+      vstepQuestions: [
+        {
+          id: 'q1',
+          question: '1. What time does Buli always get up, and what does he usually have for breakfast?',
+          questionVi: 'Buli luôn thức dậy lúc mấy giờ và anh ấy thường ăn gì vào bữa sáng?',
+          options: [
+            "A. He gets up at six o'clock and has toast for breakfast",
+            "B. He always gets up at seven o'clock and usually has fruit and yogurt",
+            "C. He gets up at eight o'clock and has cereal for breakfast",
+            'D. He gets up at nine o\'clock and skips breakfast'
+          ],
+          answer: 1,
+          evidenceIdx: 4,
+          explain: 'Ở câu #5 và #6 trong video, Buli nói rõ: "Well, I always get up at seven o\'clock. I usually have fruit and yoghurt for breakfast." Đáp án đúng là B.'
+        },
+        {
+          id: 'q2',
+          question: '2. How often does Buli go clothes shopping and skateboarding?',
+          questionVi: 'Mức độ thường xuyên đi mua sắm quần áo và chơi trượt ván của Buli là như thế nào?',
+          options: [
+            'A. He goes clothes shopping every weekend and skateboards daily',
+            'B. He hardly ever goes clothes shopping and never goes skateboarding',
+            'C. He always goes clothes shopping after swimming',
+            'D. He occasionally goes skateboarding in the park'
+          ],
+          answer: 1,
+          evidenceIdx: 9,
+          explain: 'Ở câu #10 và #12 trong video, Buli trả lời: "No, I hardly ever go clothes shopping" và "No, I never go skateboarding." Đáp án đúng là B.'
+        },
+        {
+          id: 'q3',
+          question: '3. What does the second presenter do after work in the evening?',
+          questionVi: 'Người dẫn chương trình thứ hai thường làm gì sau giờ làm việc vào buổi tối?',
+          options: [
+            'A. Always cooks dinner after work and occasionally plays video games',
+            'B. Goes swimming in the sea and drinks hot tea',
+            'C. Goes camping in the forest every night',
+            'D. Watches cartoons until midnight'
+          ],
+          answer: 0,
+          evidenceIdx: 17,
+          explain: 'Ở câu #18 và #19 trong video: "I always cook dinner after work. And I occasionally play video games." Đáp án đúng là A.'
+        },
+        {
+          id: 'q4',
+          question: '4. What does Georgie always do while traveling on the train?',
+          questionVi: 'Georgie luôn luôn làm gì khi đang di chuyển trên tàu?',
+          options: [
+            'A. She sleeps on the train',
+            'B. She always reads the news on the train',
+            'C. She plays video games on her phone',
+            'D. She eats porridge on the train'
+          ],
+          answer: 1,
+          evidenceIdx: 25,
+          explain: 'Ở câu #26 trong video, Georgie chia sẻ: "I always read the news on the train." Đáp án đúng là B.'
+        }
+      ],
+      transcript: [
+        {
+          start: 11.3,
+          end: 13.2,
+          speaker: 'Sian (BBC)',
+          en: 'How often do you go swimming?',
+          vi: 'Bạn có thường xuyên đi bơi không?'
+        },
+        {
+          start: 13.2,
+          end: 14.9,
+          speaker: 'Sian (BBC)',
+          en: 'Hello, Buli!',
+          vi: 'Xin chào Buli!'
+        },
+        {
+          start: 14.9,
+          end: 16.3,
+          speaker: 'Buli (BBC)',
+          en: 'Hi, Sian!',
+          vi: 'Chào Sian!'
+        },
+        {
+          start: 16.3,
+          end: 19.2,
+          speaker: 'Sian (BBC)',
+          en: 'What is your daily routine?',
+          vi: 'Thói quen sinh hoạt hằng ngày của bạn là gì?'
+        },
+        {
+          start: 19.2,
+          end: 23.2,
+          speaker: 'Buli (BBC)',
+          en: "Well, I always get up at seven o'clock.",
+          vi: 'À, tôi luôn luôn thức dậy vào lúc 7 giờ sáng.'
+        },
+        {
+          start: 23.2,
+          end: 28.5,
+          speaker: 'Buli (BBC)',
+          en: 'I usually have fruit and yogurt for breakfast.',
+          vi: 'Tôi thường ăn trái cây và sữa chua cho bữa sáng.'
+        },
+        {
+          start: 30.0,
+          end: 33.2,
+          speaker: 'Buli (BBC)',
+          en: 'I often go jogging.',
+          vi: 'Tôi thường xuyên đi chạy bộ.'
+        },
+        {
+          start: 35.2,
+          end: 39.2,
+          speaker: 'Buli (BBC)',
+          en: 'I sometimes go swimming after work.',
+          vi: 'Thỉnh thoảng tôi đi bơi sau giờ làm việc.'
+        },
+        {
+          start: 41.5,
+          end: 50.2,
+          speaker: 'Buli & Sian',
+          en: 'And I occasionally watch a film. Do you go clothes shopping?',
+          vi: 'Và đôi khi tôi xem một bộ phim. Thế bạn có đi mua sắm quần áo không?'
+        },
+        {
+          start: 50.3,
+          end: 53.8,
+          speaker: 'Buli (BBC)',
+          en: 'No, I hardly ever go clothes shopping.',
+          vi: 'Không, tôi hầu như chẳng bao giờ đi mua sắm quần áo.'
+        },
+        {
+          start: 54.5,
+          end: 59.2,
+          speaker: 'Sian (BBC)',
+          en: 'How about skateboarding? Do you go skateboarding?',
+          vi: 'Thế còn trượt ván thì sao? Bạn có đi trượt ván không?'
+        },
+        {
+          start: 59.3,
+          end: 62.6,
+          speaker: 'Buli (BBC)',
+          en: 'No, I never go skateboarding.',
+          vi: 'Không, tôi không bao giờ chơi trượt ván.'
+        },
+        {
+          start: 64.2,
+          end: 68.3,
+          speaker: 'Buli (BBC)',
+          en: 'How about you, Sian? What is your daily routine?',
+          vi: 'Thế còn bạn thì sao? Thói quen hằng ngày của bạn như thế nào?'
+        },
+        {
+          start: 69.0,
+          end: 73.3,
+          speaker: 'Presenter 2',
+          en: 'I usually get up at quarter past six.',
+          vi: 'Tôi thường thức dậy vào lúc 6 giờ 15 phút.'
+        },
+        {
+          start: 75.0,
+          end: 79.3,
+          speaker: 'Presenter 2',
+          en: 'I often have porridge for breakfast.',
+          vi: 'Tôi thường ăn cháo yến mạch cho bữa sáng.'
+        },
+        {
+          start: 80.8,
+          end: 84.4,
+          speaker: 'Presenter 2',
+          en: 'I sometimes listen to a podcast.',
+          vi: 'Thỉnh thoảng tôi nghe một chương trình podcast.'
+        },
+        {
+          start: 84.4,
+          end: 87.1,
+          speaker: 'Presenter 2',
+          en: 'Welcome to Real Easy English.',
+          vi: 'Chào mừng các bạn đến với chương trình Real Easy English.'
+        },
+        {
+          start: 87.1,
+          end: 90.8,
+          speaker: 'Presenter 2',
+          en: 'I always cook dinner after work.',
+          vi: 'Tôi luôn tự nấu bữa tối sau giờ làm việc.'
+        },
+        {
+          start: 92.9,
+          end: 97.2,
+          speaker: 'Presenter 2',
+          en: 'And I occasionally play video games.',
+          vi: 'Và đôi khi tôi chơi trò chơi điện tử.'
+        },
+        {
+          start: 98.5,
+          end: 101.2,
+          speaker: 'Sian (BBC)',
+          en: 'Do you go swimming in the sea?',
+          vi: 'Bạn có đi bơi ở ngoài biển không?'
+        },
+        {
+          start: 101.5,
+          end: 106.8,
+          speaker: 'Presenter 2',
+          en: 'No, I hardly ever go swimming in the sea.',
+          vi: 'Không, tôi hầu như chẳng bao giờ đi bơi ở biển.'
+        },
+        {
+          start: 107.5,
+          end: 109.8,
+          speaker: 'Sian (BBC)',
+          en: 'Do you drink tea?',
+          vi: 'Bạn có uống trà không?'
+        },
+        {
+          start: 109.8,
+          end: 113.0,
+          speaker: 'Presenter 2',
+          en: 'No, I never drink tea.',
+          vi: 'Không, tôi không bao giờ uống trà.'
+        },
+        {
+          start: 114.2,
+          end: 119.3,
+          speaker: 'Georgie (BBC)',
+          en: "Hi Georgie! Hello! What's your daily routine?",
+          vi: 'Chào Georgie! Xin chào! Thói quen sinh hoạt hằng ngày của bạn là gì?'
+        },
+        {
+          start: 119.4,
+          end: 123.5,
+          speaker: 'Georgie (BBC)',
+          en: 'I usually get up at quarter to eight.',
+          vi: 'Tôi thường thức dậy vào lúc 8 giờ kém 15.'
+        },
+        {
+          start: 124.5,
+          end: 128.6,
+          speaker: 'Georgie (BBC)',
+          en: 'I often eat cereal for breakfast.',
+          vi: 'Tôi thường ăn ngũ cốc vào bữa sáng.'
+        },
+        {
+          start: 130.9,
+          end: 135.3,
+          speaker: 'Georgie (BBC)',
+          en: 'I always read the news on the train.',
+          vi: 'Tôi luôn luôn đọc tin tức khi đi trên tàu.'
+        },
+        {
+          start: 136.0,
+          end: 141.0,
+          speaker: 'Georgie (BBC)',
+          en: 'I sometimes exercise after work.',
+          vi: 'Thỉnh thoảng tôi tập thể dục sau giờ làm việc.'
+        },
+        {
+          start: 142.6,
+          end: 145.8,
+          speaker: 'Georgie (BBC)',
+          en: 'And I occasionally watch TV.',
+          vi: 'Và đôi khi tôi xem truyền hình.'
+        },
+        {
+          start: 147.4,
+          end: 154.8,
+          speaker: 'Georgie (BBC)',
+          en: 'Do you sometimes go to the gym? No, I hardly ever go to the gym.',
+          vi: 'Bạn có thỉnh thoảng đến phòng tập gym không? Không, tôi hiếm khi đến phòng gym lắm.'
+        }
+      ]
+    },
+    {
       id: 'b1-elllo-50-jill',
       title: 'ELLLO #50: Jill from Australia — What Are You Wearing Today?',
-      source: 'ELLLO B1 Video #50 (Giọng người thật)',
+      source: 'ELLLO B1 Audio & Video #50 (Giọng người thật)',
       topic: 'VSTEP Part 1–2 • Daily Life & Experiences',
       duration: '01:05',
-      youtubeId: '9x9v296bO0c',
+      youtubeId: '',
+      audioUrl: 'https://www.elllo.org/Audio/1ME-B1INT/B1-050-Jill-Clothes.mp3',
       vstepQuestions: [
         {
           id: 'q1',
@@ -536,84 +861,84 @@
       transcript: [
         {
           start: 0,
-          end: 2.5,
+          end: 2.0,
           speaker: 'Jill (Australia)',
           en: 'Hi everyone.',
           vi: 'Xin chào mọi người.'
         },
         {
-          start: 2.5,
-          end: 6.0,
+          start: 2.0,
+          end: 5.5,
           speaker: 'Jill (Australia)',
           en: "My name is Jill and I'm from Australia.",
           vi: 'Tên tôi là Jill và tôi đến từ nước Úc.'
         },
         {
-          start: 6.0,
-          end: 10.5,
+          start: 5.5,
+          end: 10.0,
           speaker: 'Jill (Australia)',
           en: 'And my question today is, what are you wearing today?',
           vi: 'Và câu hỏi của tôi ngày hôm nay là: Hôm nay bạn đang mặc trang phục gì?'
         },
         {
-          start: 10.5,
-          end: 19.0,
+          start: 10.0,
+          end: 18.5,
           speaker: 'Jill (Australia)',
           en: "I'm actually really excited to answer this question because I am wearing my new favorite T-shirt, and it is from my most recent holiday.",
           vi: 'Thực sự tôi rất hào hứng trả lời câu hỏi này vì tôi đang mặc chiếc áo phông mới yêu thích nhất của mình, được mua từ kỳ nghỉ gần đây nhất.'
         },
         {
-          start: 19.0,
-          end: 25.0,
+          start: 18.5,
+          end: 24.5,
           speaker: 'Jill (Australia)',
           en: 'It is the shade of green that I love the most because it reminds me of the ocean.',
           vi: 'Đó là tông màu xanh mà tôi yêu thích nhất bởi vì nó gợi cho tôi nhớ đến đại dương.'
         },
         {
-          start: 25.0,
-          end: 29.0,
+          start: 24.5,
+          end: 28.5,
           speaker: 'Jill (Australia)',
           en: 'It also reminds me of the forest.',
           vi: 'Màu xanh ấy cũng gợi cho tôi nhớ đến những cánh rừng.'
         },
         {
-          start: 29.0,
-          end: 34.5,
+          start: 28.5,
+          end: 34.0,
           speaker: 'Jill (Australia)',
           en: 'On the T-shirt, it says, "Either fight it or ride it."',
           vi: 'Trên chiếc áo phông có in dòng chữ: "Một là chống lại nó, hai là cưỡi lên nó."'
         },
         {
-          start: 34.5,
-          end: 39.5,
+          start: 34.0,
+          end: 39.0,
           speaker: 'Jill (Australia)',
           en: 'There is a picture of a girl riding a wave.',
           vi: 'Trên áo có hình ảnh một cô gái đang cưỡi trên ngọn sóng.'
         },
         {
-          start: 39.5,
-          end: 47.5,
+          start: 39.0,
+          end: 47.0,
           speaker: 'Jill (Australia)',
           en: 'And this is the perfect T-shirt for me because on my recent holiday, I went to a surfing camp.',
           vi: 'Và đây là chiếc áo hoàn hảo nhất với tôi bởi vì trong kỳ nghỉ gần đây, tôi đã tham gia một trại học lướt sóng.'
         },
         {
-          start: 47.5,
-          end: 51.5,
+          start: 47.0,
+          end: 51.0,
           speaker: 'Jill (Australia)',
           en: 'And I learned how to surf.',
           vi: 'Và tại đó tôi đã học được cách lướt sóng.'
         },
         {
-          start: 51.5,
-          end: 56.5,
+          start: 51.0,
+          end: 56.0,
           speaker: 'Jill (Australia)',
           en: 'It was really fun and a great challenge.',
           vi: 'Trải nghiệm đó thực sự rất vui và cũng là một thử thách tuyệt vời.'
         },
         {
-          start: 56.5,
-          end: 63.0,
+          start: 56.0,
+          end: 62.5,
           speaker: 'Jill (Australia)',
           en: 'So every time I wear this T-shirt, I remember that wonderful trip.',
           vi: 'Vì thế mỗi lần mặc chiếc áo phông này, tôi lại nhớ về chuyến đi tuyệt vời ấy.'
@@ -623,10 +948,11 @@
     {
       id: 'b1-elllo-04-lesya',
       title: 'ELLLO #04: Lisa (Lesya) from Ukraine — What Time Is It Now?',
-      source: 'ELLLO Video #04 (One Minute English)',
+      source: 'ELLLO Audio #04 (One Minute English - Giọng người thật)',
       topic: 'VSTEP Part 1 • Time Zones & Living Abroad',
-      duration: '00:45',
+      duration: '00:40',
       youtubeId: '',
+      audioUrl: 'https://www.elllo.org/Audio/1ME-A2BEG/A2-004-LESYA-WHAT-TIME-IS-IT-NOW.mp3',
       vstepQuestions: [
         {
           id: 'q1',
@@ -699,95 +1025,6 @@
           speaker: 'Lisa / Lesya',
           en: 'Now I am in Ukraine and it is 11:30 AM, but I usually live in Poland and in Poland now it is 10:30 AM.',
           vi: 'Hiện tại tôi đang ở Ukraine và bây giờ là 11 giờ 30 sáng, nhưng tôi thường sống ở Ba Lan và ở Ba Lan lúc này đang là 10 giờ 30 sáng.'
-        }
-      ]
-    },
-    {
-      id: 'b1-bbc-daily-routine',
-      title: 'BBC Learning English — Daily Routine & Swimming',
-      source: 'BBC Learning English Video (Giọng người thật)',
-      topic: 'VSTEP Part 2 • Daily Routine & Fitness',
-      duration: '01:20',
-      youtubeId: 'gCs4knrlnD4',
-      vstepQuestions: [
-        {
-          id: 'q1',
-          question: '1. What does Speaker A usually do right after getting up at seven o\'clock?',
-          questionVi: 'Người nói A thường làm gì ngay sau khi thức dậy lúc 7 giờ sáng?',
-          options: [
-            'A. Goes straight to the local swimming pool',
-            'B. Makes a cup of tea and has a healthy breakfast',
-            'C. Checks work emails on the computer',
-            'D. Takes a bus to the city office'
-          ],
-          answer: 1,
-          evidenceIdx: 0,
-          explain: 'Ở câu #1, Người nói A chia sẻ: "I usually get up at seven o\'clock and make a cup of tea before having breakfast." Đáp án đúng là B.'
-        },
-        {
-          id: 'q2',
-          question: '2. How does Speaker A travel to work in the morning?',
-          questionVi: 'Người nói A di chuyển đến nơi làm việc vào buổi sáng bằng cách nào?',
-          options: [
-            'A. By walking through the park for thirty minutes',
-            'B. By driving a car through the city center',
-            'C. By taking the underground train',
-            'D. By riding a bicycle with a colleague'
-          ],
-          answer: 0,
-          evidenceIdx: 1,
-          explain: 'Ở câu #2, Người nói A cho biết: "Walking through the park for thirty minutes gives me fresh air before I start working." (Đi bộ qua công viên 30 phút). Đáp án đúng là A.'
-        },
-        {
-          id: 'q3',
-          question: '3. Why does Speaker B go to the local swimming pool in the evening?',
-          questionVi: 'Tại sao Người nói B lại đến hồ bơi địa phương vào buổi tối?',
-          options: [
-            'A. To prepare for a national swimming competition',
-            'B. To teach children how to swim after school',
-            'C. To clear the mind and feel more relaxed after work',
-            'D. Because the swimming pool is free after six o\'clock'
-          ],
-          answer: 2,
-          evidenceIdx: 3,
-          explain: 'Ở câu #4, Người nói B giải thích: "Swimming for an hour helps me clear my mind and feel much more relaxed." Đáp án đúng là C.'
-        }
-      ],
-      transcript: [
-        {
-          start: 5,
-          end: 13,
-          speaker: 'Speaker A',
-          en: "I usually get up at seven o'clock and make a cup of tea before having breakfast.",
-          vi: 'Tôi thường thức dậy lúc 7 giờ sáng và pha một tách trà trước khi ăn bữa sáng.'
-        },
-        {
-          start: 13,
-          end: 22,
-          speaker: 'Speaker A',
-          en: 'Walking through the park for thirty minutes gives me fresh air before I start working.',
-          vi: 'Đi bộ xuyên qua công viên trong 30 phút mang lại cho tôi bầu không khí trong lành trước khi bắt đầu làm việc.'
-        },
-        {
-          start: 22,
-          end: 31,
-          speaker: 'Speaker B',
-          en: 'In the evening, I often go to the local swimming pool to keep active.',
-          vi: 'Vào buổi tối, tôi thường đến hồ bơi gần nhà để duy trì sự vận động năng động.'
-        },
-        {
-          start: 31,
-          end: 40,
-          speaker: 'Speaker B',
-          en: 'Swimming for an hour helps me clear my mind and feel much more relaxed.',
-          vi: 'Bơi lội trong một giờ đồng hồ giúp tôi giải tỏa đầu óc và cảm thấy thư giãn hơn rất nhiều.'
-        },
-        {
-          start: 40,
-          end: 49,
-          speaker: 'Speaker A',
-          en: 'Maintaining a balanced daily routine is a wonderful way to boost our energy.',
-          vi: 'Duy trì một thói quen sinh hoạt cân bằng hằng ngày là cách tuyệt vời để tăng cường năng lượng của chúng ta.'
         }
       ]
     },
