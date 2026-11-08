@@ -1,13 +1,11 @@
 /**
  * LexiContext Academy — Studio Luyện Nghe & Luyện Nói 3-Trong-1 (academy-listening.js)
  * Tích hợp:
- * - Bố cục Studio 2 Cột hiện đại (Trình phát Video YouTube Giọng Người Thật / Audio US + Danh sách câu bên trái | Khung thực hành câu bên phải)
- * - 3 Chế độ liên thông: 🗣️ Shadowing (Luyện nói) · ⌨️ Dictation (Chép chính tả) · 🎧 Nghe hiểu VSTEP (3-4 câu hỏi Tiếng Anh chuẩn đề thi)
- * - Đồng bộ Karaoke Thời Gian Thực (Real-time Word Highlighting) theo tiến độ Video YouTube & Audio US
- * - Phiên âm IPA chuẩn Oxford/Cambridge 100% dưới từng từ + Chạm từ bất kỳ để tra nghĩa & lưu vào Kho từ vựng 1-chạm
- * - Ghi âm giọng nói thật (MediaRecorder + SpeechRecognition), nghe lại băng ghi âm của chính mình,
- *   chấm từng từ bằng Thẻ Màu (Xanh ✓ / Vàng ▲ / Đỏ ✗) và Huấn luyện viên AI nhận xét phát âm 4 mục chi tiết
- * - Điều chỉnh tốc độ phát (0.5x · 0.75x · 1.0x · 1.25x · 1.5x), Ghép câu kế tiếp (1/2) & Nút Tách cụm 2 chế độ
+ * - Khung DOM Bền Vững (#studio-persistent-shell): Giữ nguyên 100% <iframe> YouTube không bao giờ bị tải lại khi bấm đổi câu, bấm từ, bật/tắt IPA hoặc thu âm
+ * - Đồng bộ Kép YouTube (Dual-Bridge postMessage + YT.Player API + Nội suy 50ms): Tự động chạy chữ Karaoke theo từng từ và tự nhảy câu phụ đề theo thời gian thực của Video
+ * - Bấm vào Câu (#1..#N) hoặc Bấm vào Từ bất kỳ: Tua ngay Video YouTube / Audio ELLLO người thật đến đúng giây của câu hoặc từ đó
+ * - 3 Chế độ liên thông: 🗣️ Shadowing (Luyện nói) · ⌨️ Dictation (Chép chính tả) · 🎧 Nghe hiểu VSTEP (Bộ câu hỏi Tiếng Anh chuẩn đề thi)
+ * - Ghi âm giọng nói thật Đa Thiết Bị (iPad/iPhone Safari, Android, PC), chấm thẻ từ Xanh ✓ / Vàng ▲ / Đỏ ✗ và AI nhận xét phát âm 4 mục
  */
 (function (global) {
   'use strict';
@@ -22,6 +20,7 @@
     swimming: { ipa: 'ˈswɪm.ɪŋ', pos: 'noun', vi: 'bơi lội', ex: 'Swimming is great for cardiovascular health.' },
     buli: { ipa: 'ˈbuː.li', pos: 'noun', vi: 'Buli (tên riêng)', ex: 'Hello, Buli!' },
     sian: { ipa: 'ʃɑːn', pos: 'noun', vi: 'Sian (tên riêng, đọc là /ʃɑːn/)', ex: 'Hi Sian! What is your daily routine?' },
+    georgie: { ipa: 'ˈdʒɔːr.dʒi', pos: 'noun', vi: 'Georgie (tên riêng)', ex: 'Georgie goes to the gym twice a week.' },
     yogurt: { ipa: 'ˈjoʊ.ɡɚt', pos: 'noun', vi: 'sữa chua', ex: 'Yogurt is good for digestion.' },
     emails: { ipa: 'ˈiː.meɪlz', pos: 'noun', vi: 'thư điện tử (email)', ex: 'I reply to urgent emails every morning.' },
     twice: { ipa: 'twaɪs', pos: 'adv', vi: 'hai lần', ex: 'Take one tablet twice a day.' },
@@ -91,7 +90,7 @@
         speaker: s.speaker || '',
         ipaNote:
           s.ipaNote ||
-          'Nghe kỹ giọng người thật trong Video hoặc bấm "🔊 Nghe US" / "Tách cụm" để luyện nhịp thở và nối âm tự nhiên.'
+          'Nghe kỹ giọng người thật trong Video/Audio hoặc bấm "🔊 Nghe US" / "Tách cụm" để luyện nhịp thở và nối âm tự nhiên.'
       }));
       const vstepQuestions = Array.isArray(item.vstepQuestions)
         ? item.vstepQuestions
@@ -103,6 +102,7 @@
         category: item.topic || item.category || `VSTEP ${lv}`,
         title: item.title,
         youtubeId: item.youtubeId || '',
+        audioUrl: item.audioUrl || '',
         sourceLabel: item.source || item.sourceLabel || `VSTEP ${lv} Studio`,
         duration: item.duration || '',
         segments,
@@ -119,8 +119,10 @@
   // Trạng thái nội bộ của Studio
   let curLessonIdx = 0;
   let curSegIdx = 0;
+  let activeLevel = 'B1';
+  let activeAppState = null;
   let studioMode = 'shadowing'; // 'shadowing' | 'dictation' | 'vstep'
-  let mediaTab = 'video'; // Mặc định ưu tiên 'video' nếu bài học có youtubeId
+  let mediaTab = 'video'; // 'video' | 'audio'
   let leftSubTab = 'subtitles'; // 'subtitles' | 'guide'
   let showIPA = true;
   let showTrans = true;
@@ -132,7 +134,7 @@
   // Trạng thái từ đang mở Popover tra nghĩa
   let activePopoverWord = null;
 
-  // Trạng thái Ghi âm giọng thật & Nhận diện giọng nói Đa Thiết Bị (iOS/iPadOS, Android, Windows/Mac)
+  // Trạng thái Ghi âm giọng thật & Nhận diện giọng nói Đa Thiết Bị
   let isRecording = false;
   let isAudioOnlyRecording = false;
   let recordSeconds = 0;
@@ -142,12 +144,10 @@
   let speechRec = null;
   let liveTranscript = '';
 
-  // Tự động dọn dữ liệu bài tự nhập cũ bị lỗi Lỗi 153 / thiếu dịch câu trong localStorage (nếu có từ phiên bản cũ)
   try {
     localStorage.removeItem('lexicontext_studio_custom_lessons_v1');
   } catch (e) {}
 
-  // Phát hiện thiết bị iOS / iPadOS / Safari (nơi getUserMedia khóa kênh Micro nếu bật cùng lúc với SpeechRecognition)
   function isSingleChannelMicDevice() {
     if (typeof navigator === 'undefined') return false;
     const ua = navigator.userAgent || '';
@@ -158,20 +158,161 @@
     return isAppleTouch || isSafariEngine;
   }
 
-  // Bộ nhớ kết quả thu âm theo từng câu: key = `${lesson.id}_${segIdx}_${mergeNext ? 2 : 1}`
   const recordingStore = {};
-
-  // Bộ nhớ đáp án đã chọn cho bộ câu hỏi VSTEP: key = `${lesson.id}_${qIdx}`
   const vstepAnswersStore = {};
 
-  // Quản lý Trình phát YouTube IFrame API (Giọng người thật + Karaoke chữ chạy thời gian thực)
+  // ============================================================================
+  // BỘ ĐIỀU KHIỂN ĐỒNG BỘ KÉP YOUTUBE (postMessage Bridge + YT.Player + Nội suy 50ms)
+  // & TRÌNH PHÁT AUDIO GIỌNG NGƯỜI THẬT (ELLLO MP3)
+  // ============================================================================
   let ytApiLoaded = false;
   let ytPlayer = null;
   let ytPlayerReady = false;
   let currentYtVideoId = '';
-  let preservedYtWrapEl = null;
+  let ytBridgeListeningBound = false;
+  let ytHandshakeTimerId = null;
+  let ytState = {
+    currentTime: 0,
+    lastSyncTs: 0,
+    playerState: -1 // 1 = playing, 2 = paused, 0 = ended
+  };
+
+  // Trình phát Audio Giọng Người Thật (dành cho các bài ELLLO có audioUrl)
+  let humanAudioEl = null;
+
+  // Quản lý đồng bộ Karaoke & theo dõi câu thoại tự động
   let karaokeTimerId = null;
   let activeHighlightedWordIdx = -1;
+  let activeSegmentEndTarget = null; // Nếu người dùng bấm phát riêng 1 câu thì giữ mốc dừng hoặc lặp; nếu bấm Play trên YouTube thì tự động nhảy câu liên tục
+
+  function setupYouTubePostMessageListener() {
+    if (ytBridgeListeningBound) return;
+    ytBridgeListeningBound = true;
+
+    global.addEventListener('message', (event) => {
+      if (!event.origin || !/youtube(-nocookie)?\.com/i.test(event.origin)) return;
+      let data = null;
+      try {
+        data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+      } catch (e) {
+        return;
+      }
+      if (!data || typeof data !== 'object') return;
+
+      if (data.event === 'onReady' || data.event === 'initialDelivery' || data.event === 'infoDelivery') {
+        ytPlayerReady = true;
+        if (ytHandshakeTimerId) {
+          clearInterval(ytHandshakeTimerId);
+          ytHandshakeTimerId = null;
+        }
+      }
+
+      if (data.info && typeof data.info === 'object') {
+        if (typeof data.info.currentTime === 'number') {
+          ytState.currentTime = data.info.currentTime;
+          ytState.lastSyncTs = Date.now();
+        }
+        if (typeof data.info.playerState === 'number') {
+          const prevState = ytState.playerState;
+          ytState.playerState = data.info.playerState;
+          ytState.lastSyncTs = Date.now();
+          // Khi người dùng bấm nút Play trực tiếp trên khung Video YouTube -> kích hoạt đồng bộ chữ chạy ngay lập tức
+          if (ytState.playerState === 1 && prevState !== 1) {
+            ensureContinuousVideoKaraokeLoop();
+          }
+        }
+      }
+    });
+  }
+
+  function sendYtCommand(funcName, args) {
+    const iframe = document.getElementById('studio-yt-player-instance');
+    if (iframe && iframe.contentWindow) {
+      try {
+        iframe.contentWindow.postMessage(
+          JSON.stringify({
+            event: 'command',
+            func: funcName,
+            args: Array.isArray(args) ? args : [],
+            id: 'studio-yt-player-instance',
+            channel: 'widget'
+          }),
+          '*'
+        );
+      } catch (e) {}
+    }
+    if (ytPlayer && ytPlayerReady && typeof ytPlayer[funcName] === 'function') {
+      try {
+        ytPlayer[funcName].apply(ytPlayer, Array.isArray(args) ? args : []);
+      } catch (e) {}
+    }
+  }
+
+  function sendYtListeningHandshake() {
+    const iframe = document.getElementById('studio-yt-player-instance');
+    if (!iframe || !iframe.contentWindow) return;
+    try {
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          event: 'listening',
+          id: 'studio-yt-player-instance',
+          channel: 'widget'
+        }),
+        '*'
+      );
+      iframe.contentWindow.postMessage(
+        JSON.stringify({
+          event: 'command',
+          func: 'addEventListener',
+          args: ['onStateChange'],
+          id: 'studio-yt-player-instance',
+          channel: 'widget'
+        }),
+        '*'
+      );
+    } catch (e) {}
+  }
+
+  function getYouTubeCurrentTime() {
+    if (ytPlayer && ytPlayerReady && typeof ytPlayer.getCurrentTime === 'function') {
+      try {
+        const apiT = Number(ytPlayer.getCurrentTime());
+        if (!isNaN(apiT) && apiT > 0) {
+          ytState.currentTime = apiT;
+          ytState.lastSyncTs = Date.now();
+          return apiT;
+        }
+      } catch (e) {}
+    }
+    if (ytState.playerState === 1 && ytState.lastSyncTs > 0) {
+      const elapsedSec = ((Date.now() - ytState.lastSyncTs) / 1000) * (playbackSpeed || 1);
+      return ytState.currentTime + Math.min(0.6, Math.max(0, elapsedSec));
+    }
+    return ytState.currentTime || 0;
+  }
+
+  function getYouTubePlayerState() {
+    if (ytPlayer && ytPlayerReady && typeof ytPlayer.getPlayerState === 'function') {
+      try {
+        const st = ytPlayer.getPlayerState();
+        if (typeof st === 'number') {
+          ytState.playerState = st;
+          return st;
+        }
+      } catch (e) {}
+    }
+    return ytState.playerState;
+  }
+
+  function pauseAllRealMedia() {
+    sendYtCommand('pauseVideo', []);
+    ytState.playerState = 2;
+    if (humanAudioEl && !humanAudioEl.paused) {
+      try {
+        humanAudioEl.pause();
+      } catch (e) {}
+    }
+  }
 
   function cleanWordToken(w) {
     return String(w || '')
@@ -185,7 +326,6 @@
       .replace(/^\/+|\/+$/g, '');
   }
 
-  // Tự động tra cứu phiên âm IPA chuẩn từ DictionaryAPI nếu gặp từ hiếm chưa có trong từ điển tĩnh
   function fetchLiveIpaIfNeeded(cleanWord) {
     if (!cleanWord || cleanWord.length < 2 || pendingIpaFetches.has(cleanWord)) return;
     pendingIpaFetches.add(cleanWord);
@@ -215,7 +355,6 @@
             vi: firstMeaning || 'Bấm "🔊 US" để nghe phát âm chuẩn',
             ex: ''
           };
-          // Cập nhật ngay trên giao diện mà không cần render lại toàn trang
           document.querySelectorAll(`[data-studio-ipa-word="${cleanWord}"]`).forEach((el) => {
             el.textContent = `/${cleanIpa}/`;
           });
@@ -224,14 +363,12 @@
       .catch(() => {});
   }
 
-  // Tìm từ trong Kho từ vựng cá nhân hoặc Từ điển chuẩn Oxford/Cambridge
   function lookupWordInfo(rawWord) {
     const clean = cleanWordToken(rawWord);
     if (!clean) {
       return { word: rawWord, ipa: '', pos: 'word', vi: '', ex: '' };
     }
 
-    // 1. Tìm trong Kho từ vựng cá nhân (LocalStorage)
     try {
       const rawVault = localStorage.getItem('lexicontext_master_db_unified');
       if (rawVault) {
@@ -250,7 +387,6 @@
       }
     } catch (e) {}
 
-    // 2. Tìm trong từ điển tổng hợp (bao gồm /listening-lessons-data.js)
     const dict = getMergedWordDict();
     const baseCandidates = [
       clean,
@@ -277,7 +413,6 @@
       }
     }
 
-    // 3. Kích hoạt tra cứu IPA chuẩn trực tuyến cho từ hiếm và dùng bộ quy tắc IPA dự phòng
     fetchLiveIpaIfNeeded(clean);
     const autoIpa = approximateEnglishIPA(clean);
     return {
@@ -326,24 +461,47 @@
     return s;
   }
 
-  // Quản lý hiệu ứng tô sáng từng từ theo thời gian thực (Karaoke Sync)
+  // ============================================================================
+  // HIỆU ỨNG SÓNG KARAOKE THỜI GIAN THỰC (WAVE KARAOKE HIGHLIGHTER)
+  // Làm sáng rõ từng từ trên cả Khung thực hành cột phải + Thanh tiến trình + Danh sách phụ đề cột trái
+  // ============================================================================
   function clearKaraokeTimer() {
     if (karaokeTimerId) {
       clearInterval(karaokeTimerId);
       karaokeTimerId = null;
     }
-    if (activeHighlightedWordIdx !== -1) {
-      document.querySelectorAll('[data-studio-word-idx]').forEach((btn) => {
-        btn.classList.remove(
-          'bg-emerald-500/25',
-          'ring-2',
-          'ring-emerald-400',
-          'scale-105',
-          'shadow-md'
-        );
-      });
-      activeHighlightedWordIdx = -1;
-    }
+    activeSegmentEndTarget = null;
+    resetKaraokeVisuals();
+  }
+
+  function resetKaraokeVisuals() {
+    activeHighlightedWordIdx = -1;
+    document.querySelectorAll('[data-studio-word-idx]').forEach((btn) => {
+      btn.classList.remove(
+        'bg-emerald-400',
+        'text-slate-950',
+        'ring-2',
+        'ring-emerald-200',
+        '-translate-y-1',
+        'scale-110',
+        'shadow-lg',
+        'bg-emerald-500/15',
+        'ring-1',
+        'ring-emerald-500/30'
+      );
+      const wordSpan = btn.querySelector('[data-studio-word-text]');
+      if (wordSpan) wordSpan.classList.remove('!text-slate-950', '!text-emerald-400');
+      const ipaSpan = btn.querySelector('[data-studio-ipa-word]');
+      if (ipaSpan) ipaSpan.classList.remove('!text-slate-900', 'font-bold');
+    });
+
+    document.querySelectorAll('[data-left-sub-word-idx]').forEach((sp) => {
+      sp.className = 'transition-colors duration-100 rounded px-0.5';
+    });
+
+    const progBar = document.getElementById('studio-karaoke-progress-fill');
+    if (progBar) progBar.style.width = '0%';
+
     const statusEl = document.getElementById('studio-live-sync-badge');
     if (statusEl) {
       statusEl.textContent = '';
@@ -351,39 +509,76 @@
     }
   }
 
-  function highlightWordAtIndex(wIdx, labelText) {
-    if (wIdx !== activeHighlightedWordIdx) {
-      document.querySelectorAll('[data-studio-word-idx]').forEach((btn) => {
-        const idx = Number(btn.getAttribute('data-studio-word-idx'));
-        if (idx === wIdx) {
-          btn.classList.add(
-            'bg-emerald-500/25',
-            'ring-2',
-            'ring-emerald-400',
-            'scale-105',
-            'shadow-md'
-          );
-        } else {
-          btn.classList.remove(
-            'bg-emerald-500/25',
-            'ring-2',
-            'ring-emerald-400',
-            'scale-105',
-            'shadow-md'
-          );
-        }
-      });
-      activeHighlightedWordIdx = wIdx;
-    }
+  function highlightWordAtIndex(wIdx, progressPct, labelText) {
+    const pct = Math.max(0, Math.min(100, Math.round((progressPct || 0) * 100)));
+    const progBar = document.getElementById('studio-karaoke-progress-fill');
+    if (progBar) progBar.style.width = `${pct}%`;
+
     const statusEl = document.getElementById('studio-live-sync-badge');
     if (statusEl && labelText) {
       statusEl.textContent = labelText;
       statusEl.classList.remove('hidden');
     }
+
+    if (wIdx === activeHighlightedWordIdx) return;
+    activeHighlightedWordIdx = wIdx;
+
+    // 1. Làm sáng từng từ trong Khung Thực Hành Câu (Cột Phải)
+    document.querySelectorAll('[data-studio-word-idx]').forEach((btn) => {
+      const idx = Number(btn.getAttribute('data-studio-word-idx'));
+      const wordSpan = btn.querySelector('[data-studio-word-text]');
+      const ipaSpan = btn.querySelector('[data-studio-ipa-word]');
+
+      btn.classList.remove(
+        'bg-emerald-400',
+        'text-slate-950',
+        'ring-2',
+        'ring-emerald-200',
+        '-translate-y-1',
+        'scale-110',
+        'shadow-lg',
+        'bg-emerald-500/15',
+        'ring-1',
+        'ring-emerald-500/30'
+      );
+      if (wordSpan) wordSpan.classList.remove('!text-slate-950', '!text-emerald-400');
+      if (ipaSpan) ipaSpan.classList.remove('!text-slate-900', 'font-bold');
+
+      if (idx === wIdx) {
+        btn.classList.add(
+          'bg-emerald-400',
+          'text-slate-950',
+          'ring-2',
+          'ring-emerald-200',
+          '-translate-y-1',
+          'scale-110',
+          'shadow-lg'
+        );
+        if (wordSpan) wordSpan.classList.add('!text-slate-950');
+        if (ipaSpan) ipaSpan.classList.add('!text-slate-900', 'font-bold');
+      } else if (idx < wIdx) {
+        btn.classList.add('bg-emerald-500/15', 'ring-1', 'ring-emerald-500/30');
+        if (wordSpan) wordSpan.classList.add('!text-emerald-400');
+      }
+    });
+
+    // 2. Làm sáng từng từ trong Danh Sách Phụ Đề (Cột Trái)
+    document.querySelectorAll('[data-left-sub-word-idx]').forEach((sp) => {
+      const idx = Number(sp.getAttribute('data-left-sub-word-idx'));
+      if (idx === wIdx) {
+        sp.className =
+          'bg-emerald-400 text-slate-950 font-extrabold rounded px-1 py-0.5 shadow-sm transition-all duration-100';
+      } else if (idx < wIdx) {
+        sp.className = 'text-emerald-400 font-semibold rounded px-0.5 transition-colors duration-100';
+      } else {
+        sp.className = 'transition-colors duration-100 rounded px-0.5';
+      }
+    });
   }
 
-  // Nạp YouTube IFrame Player API để điều khiển phát giọng người thật theo đúng mốc startSec -> endSec
+  // Nạp YouTube IFrame Player API
   function ensureYouTubeIframeAPI(onReadyCallback) {
+    setupYouTubePostMessageListener();
     if (global.YT && global.YT.Player) {
       ytApiLoaded = true;
       if (typeof onReadyCallback === 'function') onReadyCallback();
@@ -403,20 +598,22 @@
     }
   }
 
-  function mountOrUpdateYouTubePlayer(videoId, startSec, endSec, fallbackText, wordsCount) {
+  // Khởi tạo trình phát YouTube đúng 1 lần duy nhất cho mỗi videoId (KHÔNG BAO GIỜ tháo khỏi DOM khi chuyển câu/bấm từ)
+  function mountOrUpdateYouTubePlayer(videoId, startSec) {
+    setupYouTubePostMessageListener();
     const stageEl = document.getElementById('studio-yt-stage');
     if (!stageEl || !videoId) return;
 
-    // Nếu đã có trình phát YouTube của đúng videoId này, gắn lại vào stage để giữ nguyên trạng thái đã mở khóa âm thanh
-    if (preservedYtWrapEl && currentYtVideoId === videoId && ytPlayer) {
-      if (!stageEl.contains(preservedYtWrapEl)) {
-        stageEl.innerHTML = '';
-        stageEl.appendChild(preservedYtWrapEl);
-      }
+    const existingIframe = document.getElementById('studio-yt-player-instance');
+    if (existingIframe && currentYtVideoId === videoId && stageEl.contains(existingIframe)) {
+      sendYtListeningHandshake();
       return;
     }
 
-    // Nếu đổi sang bài học có videoId khác, hủy player cũ và tạo mới
+    if (ytHandshakeTimerId) {
+      clearInterval(ytHandshakeTimerId);
+      ytHandshakeTimerId = null;
+    }
     if (ytPlayer && typeof ytPlayer.destroy === 'function') {
       try {
         ytPlayer.destroy();
@@ -425,12 +622,12 @@
     ytPlayer = null;
     ytPlayerReady = false;
     currentYtVideoId = videoId;
+    ytState = { currentTime: Number(startSec) || 0, lastSyncTs: 0, playerState: -1 };
 
     const wrap = document.createElement('div');
     wrap.id = 'studio-yt-player-wrap';
     wrap.className = 'w-full h-full';
 
-    // Khởi tạo trực tiếp thẻ <iframe> với tên miền youtube-nocookie.com và thuộc tính referrerpolicy="strict-origin-when-cross-origin"
     const iframe = document.createElement('iframe');
     iframe.id = 'studio-yt-player-instance';
     iframe.className = 'w-full h-full border-0';
@@ -459,10 +656,23 @@
       startSec || 0
     )}${originQuery}`;
 
+    iframe.onload = function () {
+      sendYtListeningHandshake();
+      if (ytHandshakeTimerId) clearInterval(ytHandshakeTimerId);
+      let tries = 0;
+      ytHandshakeTimerId = setInterval(() => {
+        tries++;
+        sendYtListeningHandshake();
+        if (ytPlayerReady || tries > 20) {
+          clearInterval(ytHandshakeTimerId);
+          ytHandshakeTimerId = null;
+        }
+      }, 400);
+    };
+
     wrap.appendChild(iframe);
     stageEl.innerHTML = '';
     stageEl.appendChild(wrap);
-    preservedYtWrapEl = wrap;
 
     ensureYouTubeIframeAPI(() => {
       if (!document.getElementById('studio-yt-player-instance')) return;
@@ -472,26 +682,16 @@
           events: {
             onReady: function () {
               ytPlayerReady = true;
-              try {
-                if (typeof ytPlayer.setPlaybackRate === 'function') {
-                  ytPlayer.setPlaybackRate(playbackSpeed);
-                }
-              } catch (e) {}
+              sendYtListeningHandshake();
+              sendYtCommand('setPlaybackRate', [playbackSpeed]);
             },
-            onError: function () {
-              // Tự động chuyển sang chế độ Âm thanh Chuẩn + Karaoke nếu mạng hoặc chủ kênh chặn nhúng trên thiết bị hiện tại
-              ytPlayerReady = false;
-              mediaTab = 'audio';
-              if (global.LexiAcademy && typeof global.LexiAcademy.notify === 'function') {
-                global.LexiAcademy.notify(
-                  'Video này giới hạn nhúng trực tiếp trên trình duyệt hiện tại — Đã tự động chuyển sang Chế độ Phát Chuẩn kèm chữ chạy Karaoke!'
-                );
-              }
-              if (global.LexiAcademy && typeof global.LexiAcademy.render === 'function') {
-                global.LexiAcademy.render();
-              }
-              if (fallbackText) {
-                playSentenceUSWithKaraoke(fallbackText, wordsCount || 8);
+            onStateChange: function (ev) {
+              if (ev && typeof ev.data === 'number') {
+                ytState.playerState = ev.data;
+                ytState.lastSyncTs = Date.now();
+                if (ev.data === 1) {
+                  ensureContinuousVideoKaraokeLoop();
+                }
               }
             }
           }
@@ -500,126 +700,330 @@
     });
   }
 
-  // Phát câu hiện tại bằng Giọng Người Thật trong Video YouTube + chạy chữ Karaoke thời gian thực
-  function playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, fallbackText) {
+  // Cuộn mượt câu đang phát vào giữa khung Phụ đề cột trái
+  function scrollActiveSubtitleIntoView() {
+    const subContainer = document.getElementById('studio-subtitles-scroll-box');
+    const activeCard = subContainer
+      ? subContainer.querySelector(`[data-studio-seg="${curSegIdx}"]`)
+      : null;
+    if (subContainer && activeCard) {
+      const cTop = subContainer.scrollTop;
+      const cHeight = subContainer.clientHeight;
+      const elTop = activeCard.offsetTop - subContainer.offsetTop;
+      const elHeight = activeCard.offsetHeight;
+      if (elTop < cTop + 16 || elTop + elHeight > cTop + cHeight - 16) {
+        subContainer.scrollTo({
+          top: Math.max(0, elTop - cHeight / 2 + elHeight / 2),
+          behavior: 'smooth'
+        });
+      }
+    }
+  }
+
+  // Vòng lặp đồng bộ chữ chạy Karaoke 50ms theo thời gian thực của Video YouTube
+  // Tự động nhận diện cả khi người dùng bấm nút Play trực tiếp trên YouTube hoặc bấm chọn câu/từ
+  function ensureContinuousVideoKaraokeLoop() {
+    if (karaokeTimerId) clearInterval(karaokeTimerId);
+
+    karaokeTimerId = setInterval(() => {
+      const ctx = getActiveLessonAndSegment(activeLevel);
+      const { lesson, segs, combinedText, startSec, endSec } = ctx;
+      if (!lesson || !lesson.youtubeId || mediaTab !== 'video') {
+        clearKaraokeTimer();
+        return;
+      }
+
+      const curT = getYouTubeCurrentTime();
+      const pState = getYouTubePlayerState();
+
+      // 1. Nếu đang phát câu có giới hạn (hoặc bật Lặp lại câu) và chạm mốc kết thúc
+      if (activeSegmentEndTarget !== null && curT >= activeSegmentEndTarget) {
+        if (loopSegment) {
+          sendYtCommand('seekTo', [startSec, true]);
+          sendYtCommand('playVideo', []);
+          ytState.currentTime = startSec;
+          ytState.lastSyncTs = Date.now();
+          return;
+        }
+      }
+
+      // 2. Nếu Video đang phát liên tục và vượt sang câu thoại khác trong danh sách #1..#N -> Tự động nhảy câu phụ đề theo Video mà KHÔNG tải lại trình phát!
+      if (pState === 1 && !loopSegment && curT > 0.2) {
+        const matchedIdx = segs.findIndex(
+          (s, idx) =>
+            curT >= Number(s.start) - 0.15 &&
+            curT < Number(s.end) + (idx === segs.length - 1 ? 0.5 : 0.05)
+        );
+        if (
+          matchedIdx !== -1 &&
+          matchedIdx !== curSegIdx &&
+          !(mergeNext && matchedIdx === curSegIdx + 1)
+        ) {
+          curSegIdx = matchedIdx;
+          activePopoverWord = null;
+          activeSegmentEndTarget = null;
+          refreshStudioSlotsWithoutTouchingVideo();
+          scrollActiveSubtitleIntoView();
+          return;
+        }
+      }
+
+      // 3. Tính toán vị trí từ đang đọc (Wave Karaoke Highlight)
+      const wordsArr = combinedText.split(/\s+/).filter(Boolean);
+      const totalWords = Math.max(1, wordsArr.length);
+      const segDur = Math.max(0.8, endSec - startSec);
+
+      if (curT >= startSec - 0.25 && curT <= endSec + 0.35) {
+        const progress = Math.max(0, Math.min(0.999, (curT - startSec) / segDur));
+        const wIdx = Math.floor(progress * totalWords);
+        highlightWordAtIndex(
+          wIdx,
+          progress,
+          `🎬 Đang phát câu #${curSegIdx + 1}: ${curT.toFixed(1)}s / ${endSec.toFixed(1)}s`
+        );
+      } else if (pState === 1) {
+        const statusEl = document.getElementById('studio-live-sync-badge');
+        if (statusEl) {
+          statusEl.textContent = `🎬 Video đang phát: ${curT.toFixed(1)}s`;
+          statusEl.classList.remove('hidden');
+        }
+      }
+
+      if (pState === 2 || pState === 0) {
+        // Đã tạm dừng hoặc kết thúc video
+        clearInterval(karaokeTimerId);
+        karaokeTimerId = null;
+      }
+    }, 50);
+  }
+
+  // Tua & phát Video YouTube ngay tại giây customStartSec (không tải lại iframe!)
+  function seekAndPlayYouTubeAt(customStartSec, targetEndSec) {
+    if (typeof global.stopAudioPlayback === 'function') {
+      global.stopAudioPlayback();
+    }
+    if (humanAudioEl && !humanAudioEl.paused) {
+      try {
+        humanAudioEl.pause();
+      } catch (e) {}
+    }
+
+    const sSec = Math.max(0, Number(customStartSec) || 0);
+    activeSegmentEndTarget = typeof targetEndSec === 'number' ? targetEndSec : null;
+
+    sendYtListeningHandshake();
+    sendYtCommand('setPlaybackRate', [playbackSpeed]);
+    sendYtCommand('seekTo', [sSec, true]);
+    sendYtCommand('playVideo', []);
+
+    ytState.currentTime = sSec;
+    ytState.lastSyncTs = Date.now();
+    ytState.playerState = 1;
+
+    ensureContinuousVideoKaraokeLoop();
+    return true;
+  }
+
+  // Phát câu hoặc từ bằng File Audio Giọng Người Thật trực tiếp (ELLLO MP3) kèm chữ chạy Karaoke
+  function seekAndPlayHumanAudioAt(audioUrl, customStartSec, startSec, endSec, totalWords) {
     clearKaraokeTimer();
     if (typeof global.stopAudioPlayback === 'function') {
       global.stopAudioPlayback();
     }
+    sendYtCommand('pauseVideo', []);
 
-    const totalWords = Math.max(1, Number(wordsCount) || 1);
-    const sSec = Math.max(0, Number(startSec) || 0);
-    const eSec = Math.max(sSec + 1.5, Number(endSec) || sSec + 5);
-    const segDuration = eSec - sSec;
+    if (!humanAudioEl) {
+      humanAudioEl = new Audio();
+      humanAudioEl.preload = 'auto';
+    }
+    if (humanAudioEl.src !== audioUrl) {
+      humanAudioEl.src = audioUrl;
+    }
+    humanAudioEl.playbackRate = playbackSpeed || 1.0;
 
-    if (ytPlayer && ytPlayerReady && typeof ytPlayer.seekTo === 'function') {
+    const sSec = Math.max(0, Number(customStartSec) || 0);
+    const segStart = Math.max(0, Number(startSec) || 0);
+    const segEnd = Math.max(segStart + 1.2, Number(endSec) || segStart + 5);
+    const segDur = segEnd - segStart;
+    const wordsCount = Math.max(1, Number(totalWords) || 1);
+
+    const startPlayback = () => {
       try {
-        if (typeof ytPlayer.setPlaybackRate === 'function') {
-          ytPlayer.setPlaybackRate(playbackSpeed);
-        }
-        ytPlayer.seekTo(sSec, true);
-        ytPlayer.playVideo();
-
-        karaokeTimerId = setInterval(() => {
-          if (!ytPlayer || typeof ytPlayer.getCurrentTime !== 'function') {
-            clearKaraokeTimer();
-            return;
-          }
-          const curT = Number(ytPlayer.getCurrentTime()) || 0;
-          const playerState =
-            typeof ytPlayer.getPlayerState === 'function' ? ytPlayer.getPlayerState() : 1;
-
-          if (curT >= sSec - 0.25 && curT <= eSec + 0.15) {
-            const progress = Math.max(0, Math.min(0.999, (curT - sSec) / segDuration));
-            const wIdx = Math.floor(progress * totalWords);
-            highlightWordAtIndex(
-              wIdx,
-              `🎬 Giọng người thật: ${curT.toFixed(1)}s / ${eSec.toFixed(1)}s`
-            );
-          }
-
-          if (curT >= eSec) {
-            if (loopSegment) {
-              ytPlayer.seekTo(sSec, true);
-              ytPlayer.playVideo();
-            } else {
-              try {
-                ytPlayer.pauseVideo();
-              } catch (e) {}
-              clearKaraokeTimer();
-            }
-          } else if (playerState === 2 || playerState === 0) {
-            // Đã tạm dừng hoặc kết thúc
-            if (curT > sSec + 0.4) {
-              clearKaraokeTimer();
-            }
-          }
-        }, 60);
-        return true;
+        humanAudioEl.currentTime = sSec;
       } catch (e) {}
-    }
+      humanAudioEl
+        .play()
+        .then(() => {
+          karaokeTimerId = setInterval(() => {
+            if (!humanAudioEl || humanAudioEl.paused) {
+              clearKaraokeTimer();
+              return;
+            }
+            const curT = humanAudioEl.currentTime || 0;
+            const ctx = getActiveLessonAndSegment(activeLevel);
+            const segs = ctx.segs || [];
 
-    // Nếu trình phát YouTube đang khởi tạo lần đầu, chờ sẵn sàng rồi phát ngay
-    if (fallbackText) {
-      ensureYouTubeIframeAPI(() => {
-        setTimeout(() => {
-          if (ytPlayer && ytPlayerReady) {
-            playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, '');
-          }
-        }, 350);
-      });
+            // Tự động nhảy câu nếu file audio phát liên tục sang câu kế tiếp
+            if (!loopSegment && curT > segEnd + 0.15) {
+              const nextIdx = segs.findIndex(
+                (s) => curT >= Number(s.start) - 0.1 && curT <= Number(s.end) + 0.1
+              );
+              if (nextIdx !== -1 && nextIdx !== curSegIdx) {
+                curSegIdx = nextIdx;
+                activePopoverWord = null;
+                refreshStudioSlotsWithoutTouchingVideo();
+                scrollActiveSubtitleIntoView();
+                return;
+              }
+            }
+
+            const curCtx = getActiveLessonAndSegment(activeLevel);
+            const cStart = curCtx.startSec;
+            const cEnd = curCtx.endSec;
+            const cDur = Math.max(0.8, cEnd - cStart);
+            const cWords = Math.max(
+              1,
+              curCtx.combinedText.split(/\s+/).filter(Boolean).length
+            );
+
+            if (curT >= cStart - 0.2 && curT <= cEnd + 0.25) {
+              const progress = Math.max(0, Math.min(0.999, (curT - cStart) / cDur));
+              const wIdx = Math.floor(progress * cWords);
+              highlightWordAtIndex(
+                wIdx,
+                progress,
+                `🎧 Giọng người thật: ${curT.toFixed(1)}s / ${cEnd.toFixed(1)}s`
+              );
+            }
+
+            if (loopSegment && curT >= cEnd) {
+              humanAudioEl.currentTime = cStart;
+            }
+          }, 50);
+        })
+        .catch(() => {
+          // Dự phòng sang Giọng US Neural nếu mạng chặn file MP3 ngoài
+          const ctx = getActiveLessonAndSegment(activeLevel);
+          playSentenceUSWithKaraoke(ctx.combinedText, wordsCount);
+        });
+    };
+
+    if (humanAudioEl.readyState >= 1) {
+      startPlayback();
+    } else {
+      humanAudioEl.onloadedmetadata = () => {
+        humanAudioEl.onloadedmetadata = null;
+        startPlayback();
+      };
+      humanAudioEl.onerror = () => {
+        const ctx = getActiveLessonAndSegment(activeLevel);
+        playSentenceUSWithKaraoke(ctx.combinedText, wordsCount);
+      };
     }
-    return false;
   }
 
-  // Phát câu hiện tại bằng Giọng Chuẩn Mỹ (🔊 Nghe US) kèm hiệu ứng chữ chạy sáng thời gian thực
-  function playSentenceUSWithKaraoke(text, wordsCount) {
+  // Phát câu hiện tại bằng Giọng Chuẩn Mỹ (🔊 Nghe US) kèm hiệu ứng Sóng Karaoke thời gian thực
+  function playSentenceUSWithKaraoke(text, wordsCount, startFromWordIdx) {
     clearKaraokeTimer();
-    if (ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
-      try {
-        ytPlayer.pauseVideo();
-      } catch (e) {}
-    }
+    pauseAllRealMedia();
+
     if (typeof global.setAudioPlaybackRate === 'function') {
       global.setAudioPlaybackRate(playbackSpeed);
     }
 
-    const totalWords = Math.max(1, Number(wordsCount) || 1);
+    const wordsArr = String(text || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const totalWords = Math.max(1, Number(wordsCount) || wordsArr.length || 1);
+    const offsetWordIdx = Math.max(0, Number(startFromWordIdx) || 0);
+    const spokenSliceText =
+      offsetWordIdx > 0 && offsetWordIdx < wordsArr.length
+        ? wordsArr.slice(offsetWordIdx).join(' ')
+        : text;
+    const remainingWords = Math.max(1, totalWords - offsetWordIdx);
+
     const startTs = Date.now();
-    const estimatedDurationMs = Math.max(1600, (totalWords * 370) / (playbackSpeed || 1));
+    const estimatedDurationMs = Math.max(1200, (remainingWords * 360) / (playbackSpeed || 1));
 
     karaokeTimerId = setInterval(() => {
       const sharedAudio =
         typeof global.getSharedAudioElement === 'function' ? global.getSharedAudioElement() : null;
-      let progress = 0;
+      let localProgress = 0;
       if (
         sharedAudio &&
         !sharedAudio.paused &&
         sharedAudio.duration &&
         isFinite(sharedAudio.duration) &&
-        sharedAudio.duration > 0.3
+        sharedAudio.duration > 0.25
       ) {
-        progress = Math.max(0, Math.min(0.999, sharedAudio.currentTime / sharedAudio.duration));
+        localProgress = Math.max(
+          0,
+          Math.min(0.999, sharedAudio.currentTime / sharedAudio.duration)
+        );
       } else {
         const elapsed = Date.now() - startTs;
-        progress = Math.max(0, Math.min(0.999, elapsed / estimatedDurationMs));
+        localProgress = Math.max(0, Math.min(0.999, elapsed / estimatedDurationMs));
       }
-      const wIdx = Math.floor(progress * totalWords);
-      highlightWordAtIndex(wIdx, `🔊 Đang đọc chuẩn US (${playbackSpeed}x)...`);
-    }, 60);
+      const wIdx = Math.min(
+        totalWords - 1,
+        offsetWordIdx + Math.floor(localProgress * remainingWords)
+      );
+      const overallProgress = (offsetWordIdx + localProgress * remainingWords) / totalWords;
+      highlightWordAtIndex(
+        wIdx,
+        overallProgress,
+        `🔊 Đang đọc chuẩn US (${playbackSpeed}x): từ ${wIdx + 1}/${totalWords}`
+      );
+    }, 50);
 
     if (typeof global.speakUS === 'function') {
-      global.speakUS(text, {
+      global.speakUS(spokenSliceText, {
         onComplete: () => {
-          clearKaraokeTimer();
-          if (loopSegment) {
-            setTimeout(() => {
-              if (loopSegment) playSentenceUSWithKaraoke(text, wordsCount);
-            }, 650);
-          }
+          highlightWordAtIndex(totalWords - 1, 1, '✓ Đã đọc xong câu chuẩn US');
+          setTimeout(() => {
+            clearKaraokeTimer();
+            if (loopSegment) {
+              playSentenceUSWithKaraoke(text, totalWords, 0);
+            }
+          }, 350);
         }
       });
     }
+  }
+
+  // Phát câu hoặc từ theo nguồn ưu tiên (Video YouTube -> Audio người thật ELLLO -> Giọng chuẩn US)
+  function playSentenceOrWordAt(wordIdxOrNull) {
+    const ctx = getActiveLessonAndSegment(activeLevel);
+    const { lesson, combinedText, startSec, endSec } = ctx;
+    const wordsArr = combinedText.split(/\s+/).filter(Boolean);
+    const totalWords = Math.max(1, wordsArr.length);
+    const segDur = Math.max(1.0, endSec - startSec);
+
+    const isWordJump = typeof wordIdxOrNull === 'number' && wordIdxOrNull >= 0;
+    const targetSec = isWordJump
+      ? Math.max(startSec, startSec + (wordIdxOrNull / totalWords) * segDur - 0.12)
+      : startSec;
+
+    if (mediaTab === 'video' && lesson.youtubeId) {
+      seekAndPlayYouTubeAt(targetSec, endSec);
+      // Hiển thị ngay từ vừa bấm trên thanh Karaoke trong lúc chờ khung hình video nhảy tới
+      const initIdx = isWordJump ? wordIdxOrNull : 0;
+      const initProg = initIdx / totalWords;
+      highlightWordAtIndex(
+        initIdx,
+        initProg,
+        `🎬 Đang phát câu #${curSegIdx + 1} tại ${targetSec.toFixed(1)}s...`
+      );
+      return;
+    }
+
+    if (lesson.audioUrl) {
+      seekAndPlayHumanAudioAt(lesson.audioUrl, targetSec, startSec, endSec, totalWords);
+      return;
+    }
+
+    playSentenceUSWithKaraoke(combinedText, totalWords, isWordJump ? wordIdxOrNull : 0);
   }
 
   // Tính khoảng cách Levenshtein để chấm từ Gần đúng (Thẻ Vàng ▲) vs Đúng (Thẻ Xanh ✓) vs Sai (Thẻ Đỏ ✗)
@@ -646,7 +1050,6 @@
     return maxLen ? (maxLen - dp[m][n]) / maxLen : 0;
   }
 
-  // So khớp câu mục tiêu và câu người học đọc thành mảng Thẻ từ Xanh (correct) / Vàng (near) / Đỏ (wrong)
   function evaluateSpokenWords(targetText, spokenText) {
     const targetTokens = String(targetText || '')
       .trim()
@@ -727,7 +1130,6 @@
     };
   }
 
-  // Tạo nội dung nhận xét phát âm 4 mục chi tiết
   function buildAICoachFeedbackHTML(targetText, spokenText, evalResult, esc) {
     const correctWords = evalResult.wordResults
       .filter((w) => w.status === 'correct')
@@ -825,7 +1227,7 @@
   }
 
   function getActiveLessonAndSegment(lv) {
-    const list = getLessonsForLevel(lv);
+    const list = getLessonsForLevel(lv || activeLevel);
     if (curLessonIdx >= list.length) curLessonIdx = 0;
     const lesson = list[curLessonIdx] || list[0];
     const segs = lesson.segments || [];
@@ -888,29 +1290,375 @@
     };
   }
 
-  function render(lv, state) {
-    // Tạm tách khung YouTube Player trước khi cập nhật DOM để trình phát không bị tải lại
-    if (preservedYtWrapEl && preservedYtWrapEl.parentNode) {
-      preservedYtWrapEl.parentNode.removeChild(preservedYtWrapEl);
-    }
-
+  // ============================================================================
+  // CÁC HÀM Dựng Giao Diện Từng Vùng (Slots) — Tuyệt đối không chạm vào #studio-yt-stage
+  // ============================================================================
+  function buildTopBarSlotHTML(lv, ctx) {
     const esc = global.LexiAcademy.esc;
-    const ctx = getActiveLessonAndSegment(lv);
-    const {
-      list,
-      lesson,
-      segs,
-      combinedText,
-      combinedVi,
-      startSec,
-      endSec,
-      ipaNote,
-      savedRec
-    } = ctx;
+    const { list, lesson } = ctx;
+    const vstepQuestions = lesson.vstepQuestions || [];
 
-    const wordsArr = combinedText.split(/\s+/).filter(Boolean);
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-mono font-bold text-pink-400">🎙️ Talk Studio (${lv})</span>
+          <select id="studio-lesson-select" class="inp !w-auto !py-1.5 !px-3 !text-xs font-semibold max-w-[280px] sm:max-w-[430px]">
+            ${list
+              .map(
+                (it, idx) =>
+                  `<option value="${idx}" ${idx === curLessonIdx ? 'selected' : ''}>${
+                    idx + 1
+                  }. ${esc(it.title)} (${it.segments.length} câu${
+                    it.youtubeId
+                      ? ' · 🎬 Video thật'
+                      : it.audioUrl
+                      ? ' · 🎧 Giọng thật ELLLO'
+                      : ''
+                  })</option>`
+              )
+              .join('')}
+          </select>
+        </div>
+
+        <div class="flex items-center gap-1 inset p-1 rounded-xl">
+          <button
+            type="button"
+            data-studio-mode="shadowing"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+              studioMode === 'shadowing'
+                ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+                : 'text-mute hover:text-fg'
+            }"
+          >
+            🗣️ Shadowing
+          </button>
+          <button
+            type="button"
+            data-studio-mode="dictation"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+              studioMode === 'dictation'
+                ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+                : 'text-mute hover:text-fg'
+            }"
+          >
+            ⌨️ Dictation
+          </button>
+          <button
+            type="button"
+            data-studio-mode="vstep"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+              studioMode === 'vstep'
+                ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
+                : 'text-mute hover:text-fg'
+            }"
+          >
+            🎧 Nghe VSTEP (${vstepQuestions.length})
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildMediaHeaderSlotHTML(ctx) {
+    const esc = global.LexiAcademy.esc;
+    const { lesson } = ctx;
+    return `
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-xs text-mute truncate">${esc(
+          lesson.sourceLabel || lesson.category
+        )}</span>
+        <div class="flex items-center gap-1 inset p-1 rounded-lg shrink-0">
+          ${
+            lesson.youtubeId
+              ? `
+            <button
+              type="button"
+              data-studio-media="video"
+              class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
+                mediaTab === 'video'
+                  ? 'bg-pri/20 text-pri border border-pri/40'
+                  : 'text-mute hover:text-fg'
+              }"
+            >
+              📺 Video thật
+            </button>
+          `
+              : ''
+          }
+          <button
+            type="button"
+            data-studio-media="audio"
+            class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
+              mediaTab === 'audio' || !lesson.youtubeId
+                ? 'bg-pri/20 text-pri border border-pri/40'
+                : 'text-mute hover:text-fg'
+            }"
+          >
+            ${lesson.audioUrl ? '🎧 Audio người thật / US' : '🔊 Âm thanh US'}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function buildYtControlsSlotHTML(ctx) {
+    const { startSec, endSec } = ctx;
+    return `
+      <div class="flex flex-wrap items-center justify-between gap-1.5">
+        <button
+          type="button"
+          id="studio-jump-first-btn"
+          class="px-2.5 py-1.5 rounded-lg border border-line bg-inset text-fg text-[11px] font-semibold hover:border-pri whitespace-nowrap cursor-pointer"
+        >
+          ⏮ Đi đến câu #1
+        </button>
+        <button
+          type="button"
+          id="studio-play-yt-seg-btn"
+          class="px-3 py-1.5 rounded-lg bg-pink-600 text-white text-[11px] font-bold hover:bg-pink-500 whitespace-nowrap cursor-pointer shadow"
+        >
+          ▶ Phát giọng người thật #${curSegIdx + 1} (${startSec}s–${endSec}s)
+        </button>
+      </div>
+    `;
+  }
+
+  function buildAudioStageSlotHTML(ctx) {
+    const { lesson, startSec, endSec } = ctx;
+    return `
+      <div class="inset p-4 rounded-xl border border-line/70 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="text-[11px] font-mono text-pink-400 font-bold">
+              CÂU #${curSegIdx + 1}${mergeNext ? ' + #' + (curSegIdx + 2) : ''} · ${
+      lesson.audioUrl ? 'GIỌNG NGƯỜI THẬT ELLLO & CHUẨN MỸ' : 'CHUẨN MỸ (US NEURAL)'
+    }
+            </div>
+            <div class="text-xs text-mute mt-0.5">
+              Tốc độ: <b class="font-mono text-fg">${playbackSpeed}x</b> · Mốc: <span class="font-mono">${startSec}s – ${endSec}s</span>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              id="studio-jump-first-btn"
+              class="btn !py-1.5 !px-2.5 !text-xs whitespace-nowrap"
+              title="Quay về câu #1"
+            >
+              ⏮ Câu #1
+            </button>
+            ${
+              lesson.audioUrl
+                ? `
+              <button
+                type="button"
+                id="studio-left-play-human-audio"
+                class="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-xs font-bold hover:bg-pink-500 whitespace-nowrap cursor-pointer"
+              >
+                ▶ Giọng người thật (#${curSegIdx + 1})
+              </button>
+            `
+                : ''
+            }
+            <button
+              type="button"
+              id="studio-left-play-us"
+              class="btn btn-pri !py-1.5 !px-3 !text-xs font-bold whitespace-nowrap"
+            >
+              🔊 Nghe US
+            </button>
+          </div>
+        </div>
+        ${
+          lesson.youtubeId
+            ? `<div class="text-[11px] text-mute flex items-center justify-between pt-1 border-t border-line/40">
+                 <span>Bài này có sẵn Video người thật:</span>
+                 <button type="button" data-studio-media="video" class="text-pink-400 font-semibold hover:underline">Mở Video YouTube gốc →</button>
+               </div>`
+            : ''
+        }
+      </div>
+    `;
+  }
+
+  function buildLeftSubtitlesSlotHTML(ctx) {
+    const esc = global.LexiAcademy.esc;
+    const { lesson, segs, ipaNote } = ctx;
     const stats = calcLessonStats(lesson);
     const progressPct = segs.length ? Math.round((stats.doneCount / segs.length) * 100) : 0;
+
+    return `
+      <div class="space-y-2 pt-1">
+        <div class="flex items-center justify-between border-b border-line/60 pb-2 text-xs">
+          <div class="flex items-center gap-4">
+            <button
+              type="button"
+              data-studio-left-tab="subtitles"
+              class="pb-1 font-bold transition ${
+                leftSubTab === 'subtitles'
+                  ? 'text-pink-400 border-b-2 border-pink-400'
+                  : 'text-mute hover:text-fg'
+              }"
+            >
+              ☰ Phụ đề (${segs.length})
+            </button>
+            <button
+              type="button"
+              data-studio-left-tab="guide"
+              class="pb-1 font-bold transition ${
+                leftSubTab === 'guide'
+                  ? 'text-pink-400 border-b-2 border-pink-400'
+                  : 'text-mute hover:text-fg'
+              }"
+            >
+              💡 Gợi ý bài học
+            </button>
+          </div>
+          <label class="flex items-center gap-1.5 text-[11px] text-mute cursor-pointer select-none">
+            <input type="checkbox" id="studio-loop-toggle" class="accent-pink-500" ${
+              loopSegment ? 'checked' : ''
+            }>
+            <span>Lặp lại câu</span>
+          </label>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="font-mono tabular-nums font-bold text-fg">${stats.doneCount}/${
+      segs.length
+    }</span>
+            <div class="w-20 h-1.5 rounded-full bg-line overflow-hidden">
+              <div class="h-full bg-pink-500 transition-all" style="width:${progressPct}%"></div>
+            </div>
+            <span class="text-[11px] text-mute">Tiến độ</span>
+          </div>
+          <div class="flex items-center gap-3 text-[11px] text-mute">
+            <span>Độ chính xác: <b class="font-mono tabular-nums text-emerald-400">${
+              stats.avgPct !== null ? stats.avgPct + '%' : '--%'
+            }</b></span>
+            <label class="flex items-center gap-1 cursor-pointer select-none">
+              <input type="checkbox" id="studio-subs-toggle" class="accent-pink-500" ${
+                showLeftSubs ? 'checked' : ''
+              }>
+              <span>Hiện chữ</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      ${
+        leftSubTab === 'subtitles'
+          ? `
+        <div id="studio-subtitles-scroll-box" class="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+          ${segs
+            .map((seg, idx) => {
+              const isCurrent = idx === curSegIdx || (mergeNext && idx === curSegIdx + 1);
+              const segRec =
+                recordingStore[`${lesson.id}_${idx}_1`] ||
+                recordingStore[`${lesson.id}_${idx}_2`];
+              const segWords = String(seg.text || '')
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean);
+              const firstSegWordOffset =
+                mergeNext && idx === curSegIdx + 1
+                  ? String(segs[curSegIdx].text || '')
+                      .trim()
+                      .split(/\s+/)
+                      .filter(Boolean).length
+                  : 0;
+
+              const renderedSegText = isCurrent
+                ? segWords
+                    .map(
+                      (w, wLocalIdx) =>
+                        `<span data-left-sub-word-idx="${
+                          firstSegWordOffset + wLocalIdx
+                        }" class="transition-colors duration-100 rounded px-0.5">${esc(w)}</span>`
+                    )
+                    .join(' ')
+                : esc(seg.text);
+
+              return `
+                <div
+                  data-studio-seg="${idx}"
+                  class="p-3 rounded-xl border transition cursor-pointer ${
+                    isCurrent
+                      ? 'border-pink-500/80 bg-pink-500/10 ring-1 ring-pink-500/40'
+                      : 'border-line/60 bg-inset/40 hover:bg-inset/80'
+                  }"
+                >
+                  <div class="flex items-center justify-between gap-2 mb-1">
+                    <div class="flex items-center gap-1.5">
+                      <span class="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold ${
+                        isCurrent ? 'bg-pink-500 text-white' : 'bg-line/60 text-mute'
+                      }">#${idx + 1}</span>
+                      <span class="text-[10px] font-mono text-mute">${seg.start || 0}s–${
+                seg.end || 6
+              }s</span>
+                      ${
+                        seg.speaker
+                          ? `<span class="text-[10px] font-semibold text-sky-400/90">· ${esc(
+                              seg.speaker
+                            )}</span>`
+                          : ''
+                      }
+                    </div>
+                    ${
+                      segRec
+                        ? `<span class="text-[11px] font-mono tabular-nums font-bold ${
+                            segRec.pct >= 80
+                              ? 'text-emerald-400'
+                              : segRec.pct >= 55
+                              ? 'text-amber-300'
+                              : 'text-rose-400'
+                          }">${segRec.pct}% ✓</span>`
+                        : ''
+                    }
+                  </div>
+                  <p class="text-xs sm:text-sm leading-relaxed ${
+                    showLeftSubs ? 'text-fg font-medium' : 'blur-sm select-none text-mute'
+                  }">
+                    ${renderedSegText}
+                  </p>
+                  ${
+                    showLeftSubs && showTrans && seg.vi
+                      ? `<p class="text-[11px] text-emerald-400/80 mt-1">${esc(seg.vi)}</p>`
+                      : ''
+                  }
+                </div>
+              `;
+            })
+            .join('')}
+        </div>
+      `
+          : `
+        <div class="inset p-3.5 rounded-xl space-y-2.5 text-xs leading-relaxed">
+          <div>
+            <b class="text-pink-400">💡 Ghi chú phát âm & Nối âm câu #${curSegIdx + 1}:</b>
+            <p class="text-fg mt-0.5">${esc(
+              ipaNote || 'Nghe kỹ trọng âm từ và âm cuối của từng cụm.'
+            )}</p>
+          </div>
+          <div class="pt-2 border-t border-line/50">
+            <b class="text-pri">🎯 Mẹo sử dụng thông minh:</b>
+            <p class="text-mute mt-0.5">
+              • <b>Bấm vào bất kỳ câu nào</b> ở cột trái để tua ngay Video đến đúng câu đó mà không bị tải lại.<br>
+              • <b>Bấm vào bất kỳ từ nào</b> ở cột phải để tua Video đến đúng vị trí từ đó và mở thẻ từ điển IPA.
+            </p>
+          </div>
+        </div>
+      `
+      }
+    `;
+  }
+
+  function buildRightPracticeSlotHTML(lv, state, ctx) {
+    const esc = global.LexiAcademy.esc;
+    const { lesson, segs, combinedText, combinedVi, startSec, endSec, savedRec } = ctx;
+    const wordsArr = combinedText.split(/\s+/).filter(Boolean);
+    const totalWords = Math.max(1, wordsArr.length);
+    const segDur = Math.max(1.0, endSec - startSec);
 
     const draftKey = `lis_dict_${lesson.id}_${curSegIdx}`;
     const savedDictation =
@@ -919,33 +1667,34 @@
       ? global.LexiAcademy.compareTokens(combinedText, savedDictation)
       : null;
 
-    // Tạo giao diện từng từ kèm IPA chuẩn Oxford/Cambridge bên dưới (hỗ trợ Karaoke Highlight & chạm từ tra nghĩa)
+    // Tạo giao diện từng từ kèm IPA chuẩn Oxford/Cambridge bên dưới + Tua Video đến đúng từ đó khi chạm
     const interactiveWordsHTML = wordsArr
       .map((rawW, wIdx) => {
         const cleanW = cleanWordToken(rawW);
         const info = lookupWordInfo(cleanW);
         const isPopOpen = activePopoverWord && activePopoverWord.idx === wIdx;
         const cleanIpaDisplay = stripSlashes(info.ipa || cleanW);
+        const wordSec = (startSec + (wIdx / totalWords) * segDur).toFixed(1);
         return `
           <button
             type="button"
             data-studio-word="${esc(rawW)}"
             data-studio-word-idx="${wIdx}"
-            class="group inline-flex flex-col items-center px-1.5 py-1 rounded-lg transition-all duration-150 cursor-pointer select-none ${
+            class="group inline-flex flex-col items-center px-2 py-1 rounded-xl transition-all duration-150 cursor-pointer select-none ${
               isPopOpen
                 ? 'bg-pink-500/20 ring-1 ring-pink-400/60'
                 : 'hover:bg-line/30'
             }"
-            title="Chạm để nghe phát âm & tra nghĩa từ '${esc(cleanW)}'"
+            title="Chạm để tua Video tới giây ${wordSec}s & tra nghĩa từ '${esc(cleanW)}'"
           >
-            <span class="text-base sm:text-lg font-bold tracking-tight ${
+            <span data-studio-word-text class="text-base sm:text-lg font-bold tracking-tight transition-colors ${
               isPopOpen ? 'text-pink-400' : 'text-fg group-hover:text-pri'
             }">${esc(rawW)}</span>
             ${
               showIPA
                 ? `<span data-studio-ipa-word="${esc(
                     cleanW
-                  )}" class="text-[11px] font-mono text-sky-300/85 leading-tight mt-0.5">/${esc(
+                  )}" class="text-[11px] font-mono text-sky-300/85 leading-tight mt-0.5 transition-colors">/${esc(
                     cleanIpaDisplay
                   )}/</span>`
                 : ''
@@ -955,21 +1704,25 @@
       })
       .join('');
 
-    // Thẻ Từ Điển Nổi (Popover) khi người dùng bấm vào 1 từ bất kỳ trong câu
     let wordPopoverHTML = '';
     if (activePopoverWord) {
       const pInfo = lookupWordInfo(activePopoverWord.word);
+      const wIdx = activePopoverWord.idx || 0;
+      const wordSec = (startSec + (wIdx / totalWords) * segDur).toFixed(1);
       wordPopoverHTML = `
         <div id="studio-word-popover" class="inset p-3.5 rounded-xl border border-pink-500/40 bg-pink-500/5 space-y-2 text-xs shadow-lg">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-2">
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <b class="text-base text-fg font-bold">${esc(pInfo.word)}</b>
               <span class="font-mono text-pink-400">/${esc(stripSlashes(pInfo.ipa))}/</span>
               <span class="text-mute italic">(${esc(pInfo.pos)})</span>
+              <button type="button" data-pop-seek-word="${wIdx}" class="px-2 py-0.5 rounded-md border border-emerald-400/50 bg-emerald-500/15 text-emerald-300 font-mono font-bold hover:bg-emerald-500/25 cursor-pointer">
+                🎬 Xem tại ${wordSec}s
+              </button>
               <button type="button" data-pop-speak="${esc(
                 pInfo.word
-              )}" class="px-2 py-0.5 rounded-md border border-sky-400/40 bg-sky-500/10 text-sky-300 font-mono font-bold hover:bg-sky-500/20">
-                🔊 US
+              )}" class="px-2 py-0.5 rounded-md border border-sky-400/40 bg-sky-500/10 text-sky-300 font-mono font-bold hover:bg-sky-500/20 cursor-pointer">
+                🔊 Đọc rời (US)
               </button>
             </div>
             <div class="flex items-center gap-1.5">
@@ -982,11 +1735,11 @@
                 data-meaning="${esc(pInfo.vi)}"
                 data-ex="${esc(combinedText)}"
                 data-extrans="${esc(combinedVi)}"
-                class="px-2.5 py-1 rounded-lg bg-pink-500/20 border border-pink-500/40 text-pink-300 font-bold hover:bg-pink-500/30 whitespace-nowrap"
+                class="px-2.5 py-1 rounded-lg bg-pink-500/20 border border-pink-500/40 text-pink-300 font-bold hover:bg-pink-500/30 whitespace-nowrap cursor-pointer"
               >
                 ${pInfo.inVault ? '✓ Đã có trong Kho từ' : '⭐ Lưu vào Kho từ vựng'}
               </button>
-              <button type="button" id="studio-pop-close" class="px-2 py-1 rounded-lg border border-line text-mute hover:text-fg">✕</button>
+              <button type="button" id="studio-pop-close" class="px-2 py-1 rounded-lg border border-line text-mute hover:text-fg cursor-pointer">✕</button>
             </div>
           </div>
           <div class="space-y-1">
@@ -1003,7 +1756,6 @@
       `;
     }
 
-    // Tạo các ô từ ẩn [ •••• ] hoặc Thẻ từ chấm điểm Xanh (✓) / Vàng (▲) / Đỏ (✗)
     const wordSlotsHTML = savedRec
       ? savedRec.wordResults
           .map((wr) => {
@@ -1038,7 +1790,6 @@
           })
           .join('');
 
-    // Tạo danh sách 3-4 câu hỏi Nghe hiểu VSTEP bằng Tiếng Anh (100% English Questions & Options)
     const vstepQuestions = lesson.vstepQuestions || [];
     const vstepQuestionsHTML = vstepQuestions
       .map((q, qIdx) => {
@@ -1125,741 +1876,508 @@
       .join('');
 
     return `
-      <div class="space-y-4">
-        <!-- THANH CÔNG CỤ STUDIO TRÊN ĐỈNH: CHỌN BÀI HỌC + 3 CHẾ ĐỘ (SHADOWING | DICTATION | NGHE VSTEP) -->
-        <div class="card p-3.5 sm:p-4 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <!-- Bên trái: Chọn bài học từ Kho listening-lessons-data.js -->
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-xs font-mono font-bold text-pink-400">🎙️ Talk Studio (${lv})</span>
-              <select id="studio-lesson-select" class="inp !w-auto !py-1.5 !px-3 !text-xs font-semibold max-w-[280px] sm:max-w-[420px]">
-                ${list
-                  .map(
-                    (it, idx) =>
-                      `<option value="${idx}" ${idx === curLessonIdx ? 'selected' : ''}>${
-                        idx + 1
-                      }. ${esc(it.title)} (${it.segments.length} câu${
-                        it.youtubeId ? ' · 🎬 Video thật' : ''
-                      })</option>`
-                  )
-                  .join('')}
-              </select>
-            </div>
+      <div class="card p-4 sm:p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-3">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="px-2.5 py-1 rounded-lg bg-pink-500/20 border border-pink-500/40 text-pink-300 font-mono text-xs font-bold">
+              #${curSegIdx + 1}${mergeNext && curSegIdx + 1 < segs.length ? '+' + (curSegIdx + 2) : ''}
+            </span>
+            <span class="px-2 py-1 rounded-lg bg-inset text-mute font-mono text-xs tabular-nums">
+              ${wordsArr.length} từ · ${startSec}s–${endSec}s
+            </span>
+            <span id="studio-live-sync-badge" class="hidden px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[11px] font-bold"></span>
+            ${
+              curSegIdx < segs.length - 1
+                ? `
+              <button
+                type="button"
+                id="studio-merge-next-btn"
+                class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
+                  mergeNext
+                    ? 'border-pink-500/50 bg-pink-500/15 text-pink-300'
+                    : 'border-line text-mute hover:text-fg'
+                }"
+                title="Gộp với câu tiếp theo để đọc liền hơi tự nhiên hơn (tối đa 2 câu)"
+              >
+                🔗 Ghép câu kế tiếp (${mergeNext ? '2/2' : '1/2'})
+              </button>
+            `
+                : ''
+            }
+          </div>
 
-            <!-- Bên phải: Bộ chuyển đổi 3 Chế độ -->
-            <div class="flex items-center gap-1 inset p-1 rounded-xl">
-              <button
-                type="button"
-                data-studio-mode="shadowing"
-                class="px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  studioMode === 'shadowing'
-                    ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
-                    : 'text-mute hover:text-fg'
-                }"
-              >
-                🗣️ Shadowing
-              </button>
-              <button
-                type="button"
-                data-studio-mode="dictation"
-                class="px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  studioMode === 'dictation'
-                    ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
-                    : 'text-mute hover:text-fg'
-                }"
-              >
-                ⌨️ Dictation
-              </button>
-              <button
-                type="button"
-                data-studio-mode="vstep"
-                class="px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                  studioMode === 'vstep'
-                    ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40'
-                    : 'text-mute hover:text-fg'
-                }"
-              >
-                🎧 Nghe VSTEP (${vstepQuestions.length})
-              </button>
-            </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              id="studio-toggle-ipa"
+              class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
+                showIPA
+                  ? 'border-pri/50 bg-pri/15 text-pri'
+                  : 'border-line text-mute hover:text-fg'
+              }"
+            >
+              IPA
+            </button>
+            <button
+              type="button"
+              id="studio-toggle-trans"
+              class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition whitespace-nowrap cursor-pointer ${
+                showTrans
+                  ? 'border-pri/50 bg-pri/15 text-pri'
+                  : 'border-line text-mute hover:text-fg'
+              }"
+            >
+              Dịch nghĩa
+            </button>
+            <button
+              type="button"
+              id="studio-speak-us-btn"
+              class="px-3 py-1 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-300 text-xs font-bold hover:bg-sky-500/20 whitespace-nowrap cursor-pointer"
+              title="Nghe câu chuẩn giọng Mỹ (US)"
+            >
+              🔊 Nghe US
+            </button>
+            <button
+              type="button"
+              id="studio-toggle-chunk-btn"
+              class="px-3 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold hover:bg-amber-500/20 whitespace-nowrap cursor-pointer"
+              title="Ẩn/hiện khung Tách cụm (Đọc cả câu dừng 1.5s giữa các cụm hoặc chọn cụm để nghe)"
+            >
+              Tách cụm
+            </button>
           </div>
         </div>
 
-        <!-- BỐ CỤC STUDIO 2 CỘT (TRÁI 5/12: MEDIA & DANH SÁCH CÂU #1..#N | PHẢI 7/12: KHÔNG GIAN TƯƠNG TÁC CÂU) -->
-        <div class="grid lg:grid-cols-12 gap-4 items-start">
-          
-          <!-- ================= CỘT TRÁI (5/12): VIDEO / AUDIO PLAYER & DANH SÁCH CÂU ================= -->
-          <div class="lg:col-span-5 card p-4 space-y-3.5">
-            <!-- Thanh chuyển đổi Video / Âm thanh -->
-            <div class="flex items-center justify-between gap-2">
-              <span class="text-xs text-mute truncate">${esc(
-                lesson.sourceLabel || lesson.category
-              )}</span>
-              <div class="flex items-center gap-1 inset p-1 rounded-lg shrink-0">
-                ${
-                  lesson.youtubeId
-                    ? `
-                  <button
-                    type="button"
-                    data-studio-media="video"
-                    class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
-                      mediaTab === 'video'
-                        ? 'bg-pri/20 text-pri border border-pri/40'
-                        : 'text-mute hover:text-fg'
-                    }"
-                  >
-                    📺 Video thật
-                  </button>
-                `
-                    : ''
-                }
+        <!-- VÙNG HIỂN THỊ CÂU MẪU + THANH SÓNG KARAOKE THỜI GIAN THỰC + IPA + BẢN DỊCH -->
+        <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
+          <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2.5 leading-relaxed ${
+            studioMode === 'dictation' && !showLeftSubs ? 'blur-md select-none' : ''
+          }">
+            ${interactiveWordsHTML}
+          </div>
+
+          <!-- Thanh Sóng Tiến Trình Karaoke Thời Gian Thực -->
+          <div class="w-full h-1.5 rounded-full bg-line/50 overflow-hidden">
+            <div id="studio-karaoke-progress-fill" class="h-full bg-gradient-to-r from-emerald-400 via-teal-400 to-sky-400 transition-all duration-75" style="width:0%"></div>
+          </div>
+
+          ${
+            showTrans && combinedVi
+              ? `
+            <div class="pt-2 border-t border-line/50 text-xs sm:text-sm text-emerald-400 font-medium leading-relaxed">
+              🇻🇳 <b>Dịch câu:</b> ${esc(combinedVi)}
+            </div>
+          `
+              : ''
+          }
+
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-mute pt-0.5">
+            <span>🎬 <b>Chạm vào từ bất kỳ</b> để tua Video đến đúng từ đó & tra từ điển IPA · Khi phát Video/Audio chữ sẽ sáng theo thời gian thực</span>
+          </div>
+        </div>
+
+        ${wordPopoverHTML}
+
+        <div id="studio-chunk-box" class="hidden inset p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5 text-xs">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-2">
+            <div class="flex items-center gap-2">
+              <b class="text-amber-400">Tách cụm theo nhịp thở (Chuẩn US)</b>
+              <span id="studio-chunk-status" class="font-mono text-[11px] text-mute"></span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                id="studio-chunk-play-all"
+                class="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold hover:bg-amber-500/30 whitespace-nowrap cursor-pointer"
+              >
+                ▶ Đọc cả câu (Dừng 1.5s giữa các cụm)
+              </button>
+              <button
+                type="button"
+                id="studio-chunk-stop"
+                class="px-2 py-1 rounded-lg border border-line text-mute hover:text-fg whitespace-nowrap cursor-pointer"
+              >
+                ⏹ Dừng
+              </button>
+            </div>
+          </div>
+          <div class="text-[11px] text-mute">
+            Chọn <b>▶ Đọc cả câu (Dừng 1.5s giữa các cụm)</b> hoặc bấm trực tiếp vào từng cụm bên dưới để nghe riêng cụm đó:
+          </div>
+          <div id="studio-chunk-list" class="flex flex-wrap items-center gap-2 pt-0.5"></div>
+        </div>
+
+        ${
+          studioMode === 'shadowing'
+            ? `
+          <div class="space-y-3.5 pt-1">
+            <div id="studio-rec-panel" class="inset p-4 sm:p-5 rounded-2xl border ${
+              isRecording
+                ? 'border-pink-500 bg-pink-500/10 ring-2 ring-pink-500/40'
+                : 'border-line/80'
+            } flex flex-col items-center justify-center text-center space-y-3">
+              <div class="flex flex-wrap items-center justify-center gap-3">
                 <button
                   type="button"
-                  data-studio-media="audio"
-                  class="px-2.5 py-1 rounded text-[11px] font-semibold transition whitespace-nowrap ${
-                    mediaTab === 'audio' || !lesson.youtubeId
-                      ? 'bg-pri/20 text-pri border border-pri/40'
-                      : 'text-mute hover:text-fg'
+                  id="studio-rec-toggle-btn"
+                  class="px-5 py-3 rounded-2xl flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition shadow-lg cursor-pointer ${
+                    isRecording && !isAudioOnlyRecording
+                      ? 'bg-rose-500 text-white hover:bg-rose-600'
+                      : 'bg-pink-500 text-white hover:bg-pink-600'
                   }"
                 >
-                  🔊 Âm thanh US
+                  <span class="text-base">${isRecording && !isAudioOnlyRecording ? '⏹' : '🎙️'}</span>
+                  <span>${
+                    isRecording && !isAudioOnlyRecording
+                      ? `Đang nghe & chấm điểm (${recordSeconds}s/30s) — Bấm để dừng`
+                      : savedRec && savedRec.total > 0
+                      ? 'Đọc lại để chấm điểm phát âm'
+                      : 'Nhấn để bắt đầu đọc & chấm điểm'
+                  }</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="studio-rec-audio-only-btn"
+                  class="px-3.5 py-3 rounded-2xl border text-xs font-semibold transition cursor-pointer ${
+                    isRecording && isAudioOnlyRecording
+                      ? 'border-rose-500 bg-rose-500/20 text-rose-200 font-bold'
+                      : 'border-line bg-card/80 text-mute hover:text-fg hover:border-pink-500/50'
+                  }"
+                  title="Thu băng giọng đọc để tự nghe lại trên iPad/iPhone/PC mà không ảnh hưởng kết quả chấm điểm từ"
+                >
+                  ${
+                    isRecording && isAudioOnlyRecording
+                      ? `⏹ Dừng thu băng (${recordSeconds}s)`
+                      : '🎧 Thu băng nghe lại giọng mình'
+                  }
                 </button>
               </div>
-            </div>
 
-            <!-- Khung Media Stage (Trình phát YouTube IFrame API đồng bộ chữ chạy hoặc US Neural Audio Stage) -->
-            ${
-              mediaTab === 'video' && lesson.youtubeId
-                ? `
-              <div class="space-y-2">
-                <div class="relative rounded-xl overflow-hidden border border-line bg-black aspect-video">
-                  <div id="studio-yt-stage" class="w-full h-full"></div>
-                </div>
-                <div class="flex flex-wrap items-center justify-between gap-1.5">
-                  <button
-                    type="button"
-                    id="studio-jump-first-btn"
-                    class="px-2.5 py-1.5 rounded-lg border border-line bg-inset text-fg text-[11px] font-semibold hover:border-pri whitespace-nowrap cursor-pointer"
-                  >
-                    ⏮ Đi đến câu #1
-                  </button>
-                  <button
-                    type="button"
-                    id="studio-play-yt-seg-btn"
-                    class="px-3 py-1.5 rounded-lg bg-pink-600 text-white text-[11px] font-bold hover:bg-pink-500 whitespace-nowrap cursor-pointer shadow"
-                  >
-                    ▶ Phát giọng người thật #${curSegIdx + 1} (${startSec}s–${endSec}s)
-                  </button>
-                </div>
-              </div>
-            `
-                : `
-              <div class="inset p-4 rounded-xl border border-line/70 space-y-3">
-                <div class="flex items-center justify-between gap-2">
-                  <div>
-                    <div class="text-[11px] font-mono text-pink-400 font-bold">
-                      CÂU #${curSegIdx + 1}${mergeNext ? ' + #' + (curSegIdx + 2) : ''} · CHUẨN MỸ (US NEURAL)
-                    </div>
-                    <div class="text-xs text-mute mt-0.5">
-                      Tốc độ hiện tại: <b class="font-mono text-fg">${playbackSpeed}x</b> · Mốc: <span class="font-mono">${startSec}s – ${endSec}s</span>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      id="studio-jump-first-btn"
-                      class="btn !py-1.5 !px-2.5 !text-xs whitespace-nowrap"
-                      title="Quay về câu #1"
-                    >
-                      ⏮ Câu #1
-                    </button>
-                    <button
-                      type="button"
-                      id="studio-left-play-us"
-                      class="btn btn-pri !py-1.5 !px-3 !text-xs font-bold whitespace-nowrap"
-                    >
-                      🔊 Nghe US
-                    </button>
-                  </div>
-                </div>
-                ${
-                  lesson.youtubeId
-                    ? `<div class="text-[11px] text-mute flex items-center justify-between pt-1 border-t border-line/40">
-                         <span>Bài này có sẵn Video người thật:</span>
-                         <button type="button" data-studio-media="video" class="text-pink-400 font-semibold hover:underline">Mở Video YouTube gốc →</button>
-                       </div>`
-                    : ''
-                }
-              </div>
-            `
-            }
-
-            <!-- Thanh Phụ đề / Gợi ý bài học + Tiến độ & Độ chính xác -->
-            <div class="space-y-2 pt-1">
-              <div class="flex items-center justify-between border-b border-line/60 pb-2 text-xs">
-                <div class="flex items-center gap-4">
-                  <button
-                    type="button"
-                    data-studio-left-tab="subtitles"
-                    class="pb-1 font-bold transition ${
-                      leftSubTab === 'subtitles'
-                        ? 'text-pink-400 border-b-2 border-pink-400'
-                        : 'text-mute hover:text-fg'
-                    }"
-                  >
-                    ☰ Phụ đề (${segs.length})
-                  </button>
-                  <button
-                    type="button"
-                    data-studio-left-tab="guide"
-                    class="pb-1 font-bold transition ${
-                      leftSubTab === 'guide'
-                        ? 'text-pink-400 border-b-2 border-pink-400'
-                        : 'text-mute hover:text-fg'
-                    }"
-                  >
-                    💡 Gợi ý bài học
-                  </button>
-                </div>
-                <label class="flex items-center gap-1.5 text-[11px] text-mute cursor-pointer select-none">
-                  <input type="checkbox" id="studio-loop-toggle" class="accent-pink-500" ${
-                    loopSegment ? 'checked' : ''
-                  }>
-                  <span>Lặp lại câu</span>
-                </label>
+              <div class="text-[11px] sm:text-xs text-mute">
+                Hệ thống tự động tương thích với <b>Điện thoại, iPad & Máy tính</b>: chữ bạn đọc sẽ hiện trực tiếp bên dưới và chấm từng từ <b>Xanh ✓ / Vàng ▲ / Đỏ ✗</b>.
               </div>
 
-              <!-- Dòng Tiến độ & Độ chính xác -->
-              <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div class="flex items-center gap-2">
-                  <span class="font-mono tabular-nums font-bold text-fg">${stats.doneCount}/${
-      segs.length
-    }</span>
-                  <div class="w-20 h-1.5 rounded-full bg-line overflow-hidden">
-                    <div class="h-full bg-pink-500 transition-all" style="width:${progressPct}%"></div>
-                  </div>
-                  <span class="text-[11px] text-mute">Tiến độ</span>
-                </div>
-                <div class="flex items-center gap-3 text-[11px] text-mute">
-                  <span>Độ chính xác: <b class="font-mono tabular-nums text-emerald-400">${
-                    stats.avgPct !== null ? stats.avgPct + '%' : '--%'
-                  }</b></span>
-                  <label class="flex items-center gap-1 cursor-pointer select-none">
-                    <input type="checkbox" id="studio-subs-toggle" class="accent-pink-500" ${
-                      showLeftSubs ? 'checked' : ''
-                    }>
-                    <span>Hiện chữ</span>
-                  </label>
-                </div>
+              <div id="studio-live-transcript" class="text-xs sm:text-sm font-mono text-emerald-300 font-semibold min-h-[20px] px-2">
+                ${isRecording && liveTranscript ? `"${esc(liveTranscript)}"` : ''}
               </div>
             </div>
 
-            <!-- Danh sách câu thoại #1, #2, #3... hoặc Gợi ý bài học -->
-            ${
-              leftSubTab === 'subtitles'
-                ? `
-              <div class="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-                ${segs
-                  .map((seg, idx) => {
-                    const isCurrent =
-                      idx === curSegIdx || (mergeNext && idx === curSegIdx + 1);
-                    const segRec =
-                      recordingStore[`${lesson.id}_${idx}_1`] ||
-                      recordingStore[`${lesson.id}_${idx}_2`];
-                    return `
-                      <div
-                        data-studio-seg="${idx}"
-                        class="p-3 rounded-xl border transition cursor-pointer ${
-                          isCurrent
-                            ? 'border-pink-500/70 bg-pink-500/10 ring-1 ring-pink-500/40'
-                            : 'border-line/60 bg-inset/40 hover:bg-inset/80'
-                        }"
-                      >
-                        <div class="flex items-center justify-between gap-2 mb-1">
-                          <div class="flex items-center gap-1.5">
-                            <span class="px-2 py-0.5 rounded-md text-[11px] font-mono font-bold ${
-                              isCurrent
-                                ? 'bg-pink-500 text-white'
-                                : 'bg-line/60 text-mute'
-                            }">#${idx + 1}</span>
-                            <span class="text-[10px] font-mono text-mute">${seg.start || 0}s–${
-                      seg.end || 6
-                    }s</span>
-                            ${
-                              seg.speaker
-                                ? `<span class="text-[10px] font-semibold text-sky-400/90">· ${esc(
-                                    seg.speaker
-                                  )}</span>`
-                                : ''
-                            }
-                          </div>
-                          ${
-                            segRec
-                              ? `<span class="text-[11px] font-mono tabular-nums font-bold ${
-                                  segRec.pct >= 80
-                                    ? 'text-emerald-400'
-                                    : segRec.pct >= 55
-                                    ? 'text-amber-300'
-                                    : 'text-rose-400'
-                                }">${segRec.pct}% ✓</span>`
-                              : ''
-                          }
-                        </div>
-                        <p class="text-xs sm:text-sm leading-relaxed ${
-                          showLeftSubs ? 'text-fg font-medium' : 'blur-sm select-none text-mute'
-                        }">
-                          ${esc(seg.text)}
-                        </p>
-                        ${
-                          showLeftSubs && showTrans && seg.vi
-                            ? `<p class="text-[11px] text-emerald-400/80 mt-1">${esc(seg.vi)}</p>`
-                            : ''
-                        }
-                      </div>
-                    `;
-                  })
-                  .join('')}
-              </div>
-            `
-                : `
-              <div class="inset p-3.5 rounded-xl space-y-2.5 text-xs leading-relaxed">
-                <div>
-                  <b class="text-pink-400">💡 Ghi chú phát âm & Nối âm câu #${curSegIdx + 1}:</b>
-                  <p class="text-fg mt-0.5">${esc(
-                    ipaNote || 'Nghe kỹ trọng âm từ và âm cuối của từng cụm.'
-                  )}</p>
-                </div>
-                <div class="pt-2 border-t border-line/50">
-                  <b class="text-pri">🎯 Mẹo thi VSTEP Listening & Speaking:</b>
-                  <p class="text-mute mt-0.5">
-                    Bấm vào từng câu bên trái hoặc nút <b>▶</b> để nghe giọng người thật trong Video kèm chữ chạy sáng theo thời gian thực, chạm vào từ bất kỳ để tra nghĩa, sau đó bấm <b>🎙️ Ghi âm</b> để chấm độ khớp từng từ.
-                  </p>
-                </div>
-              </div>
-            `
-            }
-          </div>
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+              <input
+                id="studio-manual-speech-in"
+                type="text"
+                class="inp !py-2 !text-xs flex-1"
+                placeholder="Hoặc chạm vào đây rồi bấm biểu tượng Mic 🎙️ trên bàn phím (iPad/iPhone/Android) để đọc..."
+                value="${savedRec && savedRec.transcript ? esc(savedRec.transcript) : ''}"
+              />
+              <button
+                type="button"
+                id="studio-eval-manual-btn"
+                class="btn !py-2 !px-3.5 !text-xs font-bold whitespace-nowrap justify-center"
+              >
+                ✓ Chấm câu vừa đọc
+              </button>
+            </div>
 
-          <!-- ================= CỘT PHẢI (7/12): KHÔNG GIAN THỰC HÀNH CÂU & CHẤM ĐIỂM ================= -->
-          <div class="lg:col-span-7 space-y-4">
-            <div class="card p-4 sm:p-5 space-y-4">
-              
-              <!-- Thanh điều khiển trên cùng của Cột Phải: #1 | N từ | Ghép câu kế tiếp (1/2) | IPA | Dịch nghĩa | Nghe US | Tách cụm -->
-              <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 pb-3">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <span class="px-2.5 py-1 rounded-lg bg-pink-500/20 border border-pink-500/40 text-pink-300 font-mono text-xs font-bold">
-                    #${curSegIdx + 1}${mergeNext && curSegIdx + 1 < segs.length ? '+' + (curSegIdx + 2) : ''}
-                  </span>
-                  <span class="px-2 py-1 rounded-lg bg-inset text-mute font-mono text-xs tabular-nums">
-                    ${wordsArr.length} từ
-                  </span>
-                  <span id="studio-live-sync-badge" class="hidden px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-[11px] font-bold"></span>
+            <div class="inset p-4 rounded-2xl border border-line/70 space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs font-bold text-mute">
                   ${
-                    curSegIdx < segs.length - 1
-                      ? `
-                    <button
-                      type="button"
-                      id="studio-merge-next-btn"
-                      class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition whitespace-nowrap ${
-                        mergeNext
-                          ? 'border-pink-500/50 bg-pink-500/15 text-pink-300'
-                          : 'border-line text-mute hover:text-fg'
-                      }"
-                      title="Gộp với câu tiếp theo để đọc liền hơi tự nhiên hơn (tối đa 2 câu)"
-                    >
-                      🔗 Ghép câu kế tiếp (${mergeNext ? '2/2' : '1/2'})
-                    </button>
-                  `
-                      : ''
+                    savedRec && savedRec.total > 0
+                      ? `${savedRec.correctCount}/${savedRec.total} từ đúng (${savedRec.pct}%)`
+                      : 'Nghe và lặp lại câu trên:'
                   }
-                </div>
-
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    id="studio-toggle-ipa"
-                    class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition whitespace-nowrap ${
-                      showIPA
-                        ? 'border-pri/50 bg-pri/15 text-pri'
-                        : 'border-line text-mute hover:text-fg'
-                    }"
-                  >
-                    IPA
-                  </button>
-                  <button
-                    type="button"
-                    id="studio-toggle-trans"
-                    class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition whitespace-nowrap ${
-                      showTrans
-                        ? 'border-pri/50 bg-pri/15 text-pri'
-                        : 'border-line text-mute hover:text-fg'
-                    }"
-                  >
-                    Dịch nghĩa
-                  </button>
-                  <button
-                    type="button"
-                    id="studio-speak-us-btn"
-                    class="px-3 py-1 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-300 text-xs font-bold hover:bg-sky-500/20 whitespace-nowrap"
-                    title="Nghe câu chuẩn giọng Mỹ (US)"
-                  >
-                    🔊 Nghe US
-                  </button>
-                  <button
-                    type="button"
-                    id="studio-toggle-chunk-btn"
-                    class="px-3 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold hover:bg-amber-500/20 whitespace-nowrap"
-                    title="Ẩn/hiện khung Tách cụm (Đọc cả câu dừng 1.5s giữa các cụm hoặc chọn cụm để nghe)"
-                  >
-                    Tách cụm
-                  </button>
-                </div>
-              </div>
-
-              <!-- VÙNG HIỂN THỊ CÂU MẪU + PHIÊN ÂM IPA DƯỚI TỪNG TỪ + BẢN DỊCH TIẾNG VIỆT TRỌN CÂU -->
-              <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
-                <div class="flex flex-wrap items-end gap-x-1.5 gap-y-2 leading-relaxed ${
-                  studioMode === 'dictation' && !showLeftSubs ? 'blur-md select-none' : ''
-                }">
-                  ${interactiveWordsHTML}
-                </div>
-
+                </span>
                 ${
-                  showTrans && combinedVi
-                    ? `
-                  <div class="pt-2.5 border-t border-line/50 text-xs sm:text-sm text-emerald-400 font-medium leading-relaxed">
-                    🇻🇳 <b>Dịch câu:</b> ${esc(combinedVi)}
-                  </div>
-                `
+                  savedRec && savedRec.total > 0
+                    ? `<span class="text-[11px] text-mute">Bấm vào từng thẻ từ bên dưới để nghe lại từ đó</span>`
                     : ''
                 }
-
-                <div class="flex items-center justify-between text-[11px] text-mute pt-1">
-                  <span>📖 Chạm vào từ bất kỳ để tra nghĩa & lưu Kho từ · Khi phát Video/Audio các từ sẽ tự sáng theo thời gian thực</span>
-                </div>
               </div>
 
-              <!-- THẺ TỪ ĐIỂN NỔI (POPOVER) KHI CHẠM VÀO TỪ -->
-              ${wordPopoverHTML}
-
-              <!-- KHUNG TÁCH CỤM (ẨN/HIỆN KHI BẤM NÚT "TÁCH CỤM" - GỒM 2 CHẾ ĐỘ) -->
-              <div id="studio-chunk-box" class="hidden inset p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5 text-xs">
-                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-line/50 pb-2">
-                  <div class="flex items-center gap-2">
-                    <b class="text-amber-400">Tách cụm theo nhịp thở (Chuẩn US)</b>
-                    <span id="studio-chunk-status" class="font-mono text-[11px] text-mute"></span>
-                  </div>
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      id="studio-chunk-play-all"
-                      class="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 font-bold hover:bg-amber-500/30 whitespace-nowrap"
-                    >
-                      ▶ Đọc cả câu (Dừng 1.5s giữa các cụm)
-                    </button>
-                    <button
-                      type="button"
-                      id="studio-chunk-stop"
-                      class="px-2 py-1 rounded-lg border border-line text-mute hover:text-fg whitespace-nowrap"
-                    >
-                      ⏹ Dừng
-                    </button>
-                  </div>
-                </div>
-                <div class="text-[11px] text-mute">
-                  Chọn <b>▶ Đọc cả câu (Dừng 1.5s giữa các cụm)</b> hoặc bấm trực tiếp vào từng cụm bên dưới để nghe riêng cụm đó:
-                </div>
-                <div id="studio-chunk-list" class="flex flex-wrap items-center gap-2 pt-0.5"></div>
-              </div>
-
-              <!-- ================= NỘI DUNG TƯƠNG TÁC THEO CHẾ ĐỘ (SHADOWING | DICTATION | NGHE VSTEP) ================= -->
               ${
-                studioMode === 'shadowing'
+                savedRec && (savedRec.transcript || savedRec.audioUrl)
                   ? `
-                <!-- CHẾ ĐỘ 1: SHADOWING & GHI ÂM CHẤM THẺ TỪ XANH / VÀNG / ĐỎ ĐA THIẾT BỊ -->
-                <div class="space-y-3.5 pt-1">
-                  <!-- Khu vực Nút Bấm Đọc Chấm Điểm & Thu Băng Giọng Thật (Tối ưu cho cả Điện thoại, iPad và Laptop/PC) -->
-                  <div id="studio-rec-panel" class="inset p-4 sm:p-5 rounded-2xl border ${
-                    isRecording
-                      ? 'border-pink-500 bg-pink-500/10 ring-2 ring-pink-500/40'
-                      : 'border-line/80'
-                  } flex flex-col items-center justify-center text-center space-y-3">
-                    <div class="flex flex-wrap items-center justify-center gap-3">
-                      <button
-                        type="button"
-                        id="studio-rec-toggle-btn"
-                        class="px-5 py-3 rounded-2xl flex items-center justify-center gap-2 text-xs sm:text-sm font-bold transition shadow-lg cursor-pointer ${
-                          isRecording && !isAudioOnlyRecording
-                            ? 'bg-rose-500 text-white hover:bg-rose-600'
-                            : 'bg-pink-500 text-white hover:bg-pink-600'
-                        }"
-                      >
-                        <span class="text-base">${isRecording && !isAudioOnlyRecording ? '⏹' : '🎙️'}</span>
-                        <span>${
-                          isRecording && !isAudioOnlyRecording
-                            ? `Đang nghe & chấm điểm (${recordSeconds}s/30s) — Bấm để dừng`
-                            : savedRec && savedRec.total > 0
-                            ? 'Đọc lại để chấm điểm phát âm'
-                            : 'Nhấn để bắt đầu đọc & chấm điểm'
-                        }</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        id="studio-rec-audio-only-btn"
-                        class="px-3.5 py-3 rounded-2xl border text-xs font-semibold transition cursor-pointer ${
-                          isRecording && isAudioOnlyRecording
-                            ? 'border-rose-500 bg-rose-500/20 text-rose-200 font-bold'
-                            : 'border-line bg-card/80 text-mute hover:text-fg hover:border-pink-500/50'
-                        }"
-                        title="Thu băng giọng đọc để tự nghe lại trên iPad/iPhone/PC mà không ảnh hưởng kết quả chấm điểm từ"
-                      >
-                        ${
-                          isRecording && isAudioOnlyRecording
-                            ? `⏹ Dừng thu băng (${recordSeconds}s)`
-                            : '🎧 Thu băng nghe lại giọng mình'
-                        }
-                      </button>
-                    </div>
-
-                    <div class="text-[11px] sm:text-xs text-mute">
-                      Hệ thống tự động tương thích với <b>Điện thoại, iPad & Máy tính</b>: chữ bạn đọc sẽ hiện trực tiếp bên dưới và chấm từng từ <b>Xanh ✓ / Vàng ▲ / Đỏ ✗</b>.
-                    </div>
-
-                    <div id="studio-live-transcript" class="text-xs sm:text-sm font-mono text-emerald-300 font-semibold min-h-[20px] px-2">
-                      ${isRecording && liveTranscript ? `"${esc(liveTranscript)}"` : ''}
-                    </div>
-                  </div>
-
-                  <!-- Ô nhập nhanh bằng Mic bàn phím (Hoạt động trên 100% thiết bị) -->
-                  <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                    <input
-                      id="studio-manual-speech-in"
-                      type="text"
-                      class="inp !py-2 !text-xs flex-1"
-                      placeholder="Hoặc chạm vào đây rồi bấm biểu tượng Mic 🎙️ trên bàn phím (iPad/iPhone/Android) để đọc..."
-                      value="${savedRec && savedRec.transcript ? esc(savedRec.transcript) : ''}"
-                    />
-                    <button
-                      type="button"
-                      id="studio-eval-manual-btn"
-                      class="btn !py-2 !px-3.5 !text-xs font-bold whitespace-nowrap justify-center"
-                    >
-                      ✓ Chấm câu vừa đọc
-                    </button>
-                  </div>
-
-                  <!-- Kết quả Ghi âm: Thanh nghe lại giọng của chính mình + Thẻ từ Xanh/Vàng/Đỏ + Nút AI Nhận xét -->
-                  <div class="inset p-4 rounded-2xl border border-line/70 space-y-3">
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                      <span class="text-xs font-bold text-mute">
-                        ${
-                          savedRec && savedRec.total > 0
-                            ? `${savedRec.correctCount}/${savedRec.total} từ đúng (${savedRec.pct}%)`
-                            : 'Nghe và lặp lại câu trên:'
-                        }
-                      </span>
-                      ${
-                        savedRec && savedRec.total > 0
-                          ? `<span class="text-[11px] text-mute">Bấm vào từng thẻ từ bên dưới để nghe lại từ đó</span>`
-                          : ''
-                      }
-                    </div>
-
-                    ${
-                      savedRec && (savedRec.transcript || savedRec.audioUrl)
-                        ? `
-                      <div class="p-3 rounded-xl bg-card/70 border border-line/60 space-y-2">
-                        ${
-                          savedRec.transcript
-                            ? `
-                          <div class="text-xs">
-                            <span class="text-mute">Bạn đã nói:</span>
-                            <p class="font-medium text-fg mt-0.5">"${esc(savedRec.transcript)}"</p>
-                          </div>
-                        `
-                            : ''
-                        }
-                        ${
-                          savedRec.audioUrl
-                            ? `
-                          <div class="pt-1">
-                            <div class="text-[11px] text-pink-400 font-semibold mb-1">🎧 Nghe lại giọng thu âm của bạn:</div>
-                            <audio controls playsinline src="${esc(
-                              savedRec.audioUrl
-                            )}" class="w-full h-9 rounded-lg"></audio>
-                          </div>
-                        `
-                            : ''
-                        }
-                      </div>
-                    `
-                        : ''
-                    }
-
-                    <!-- Danh sách ô [ •••• ] hoặc Thẻ từ Xanh ✓ / Vàng ▲ / Đỏ ✗ -->
-                    <div class="flex flex-wrap items-center gap-2 pt-1">
-                      ${wordSlotsHTML}
-                    </div>
-
-                    ${
-                      savedRec
-                        ? `
-                      <div class="pt-2 flex flex-wrap items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          id="studio-open-ai-coach-btn"
-                          class="px-4 py-2 rounded-xl bg-pink-500/20 border border-pink-500/50 text-pink-300 text-xs font-bold hover:bg-pink-500/30 transition cursor-pointer"
-                        >
-                          ✨ Nhờ AI nhận xét phát âm chi tiết
-                        </button>
-                      </div>
-                    `
-                        : ''
-                    }
-                  </div>
-
-                  <!-- KHUNG AI HUẤN LUYỆN PHÁT ÂM (4 MỤC) -->
-                  <div
-                    id="studio-ai-coach-box"
-                    class="${
-                      savedRec && savedRec.showCoach ? '' : 'hidden'
-                    } inset p-4 rounded-2xl border border-pink-500/40 bg-pink-500/5 space-y-3"
-                  >
-                    <div class="flex items-center justify-between border-b border-line/60 pb-2">
-                      <div class="flex items-center gap-2">
-                        <span class="text-base">🤖</span>
-                        <b class="text-sm text-pink-300">AI Huấn luyện phát âm</b>
-                      </div>
-                      <button type="button" id="studio-close-ai-coach" class="text-xs text-mute hover:text-fg px-2 py-0.5 rounded border border-line">Đóng</button>
-                    </div>
-                    <div id="studio-ai-coach-content">
-                      ${savedRec && savedRec.aiCoachHtml ? savedRec.aiCoachHtml : ''}
-                    </div>
-                  </div>
-                </div>
-              `
-                  : studioMode === 'dictation'
-                  ? `
-                <!-- CHẾ ĐỘ 2: DICTATION (NGHE CHÉP CHÍNH TẢ TỪNG CÂU) -->
-                <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <b class="text-xs text-pri uppercase">⌨️ Nghe Chép Chính Tả Câu #${
-                      curSegIdx + 1
-                    }</b>
-                    <div class="flex items-center gap-1.5">
-                      <button type="button" id="studio-dict-hint-btn" class="btn !py-1 !px-2.5 !text-xs">💡 Gợi ý từ tiếp theo</button>
-                      <button type="button" id="studio-dict-reveal-btn" class="btn !py-1 !px-2.5 !text-xs">👁️ Hiện/Ẩn câu mẫu</button>
-                    </div>
-                  </div>
-                  <textarea
-                    id="studio-dict-input"
-                    rows="2"
-                    class="inp text-sm font-mono"
-                    placeholder="Bấm nút ▶ (giọng người thật) hoặc '🔊 Nghe US' rồi gõ lại chính xác những gì bạn nghe được..."
-                  >${esc(savedDictation)}</textarea>
-                  <div id="studio-dict-feedback" class="text-xs leading-relaxed">
-                    ${
-                      dictResult
-                        ? `
-                      <div class="space-y-1.5">
-                        <div class="font-mono font-bold ${
-                          dictResult.pct >= 85 ? 'text-emerald-400' : 'text-amber-300'
-                        }">
-                          Độ khớp chính tả: ${dictResult.correctCount}/${dictResult.total} từ (${
-                            dictResult.pct
-                          }%)
-                        </div>
-                        <div class="flex flex-wrap gap-1">${dictResult.html}</div>
-                      </div>
-                    `
-                        : '<span class="text-mute">Gõ câu bạn nghe được vào ô trên để hệ thống kiểm tra từng từ thời gian thực.</span>'
-                    }
-                  </div>
-                </div>
-              `
-                  : `
-                <!-- CHẾ ĐỘ 3: BỘ 3-4 CÂU HỎI TRẮC NGHIỆM TIẾNG ANH CHUẨN VSTEP LISTENING + GIẢI THÍCH ĐÁP ÁN -->
-                <div class="space-y-3.5">
-                  <div class="flex flex-wrap items-center justify-between gap-2 px-1">
-                    <b class="text-xs sm:text-sm text-amber-300 uppercase">🎧 VSTEP Listening Comprehension (${
-                      vstepQuestions.length
-                    } Questions in English)</b>
-                    <span class="text-[11px] text-mute">Chọn đáp án A/B/C/D để xem dịch câu hỏi & giải thích chi tiết</span>
-                  </div>
-
-                  ${vstepQuestionsHTML}
-
+                <div class="p-3 rounded-xl bg-card/70 border border-line/60 space-y-2">
                   ${
-                    lesson.speakingPrompt
+                    savedRec.transcript
                       ? `
-                    <div class="inset p-4 rounded-2xl border border-pri/30 bg-pri/5 space-y-2 text-xs">
-                      <b class="text-pri uppercase">🗣️ Câu hỏi Mở rộng VSTEP Speaking cùng chủ đề:</b>
-                      <p class="text-sm font-bold text-fg">${esc(lesson.speakingPrompt.question)}</p>
-                      <p class="text-mute">${esc(lesson.speakingPrompt.hintVi)}</p>
+                    <div class="text-xs">
+                      <span class="text-mute">Bạn đã nói:</span>
+                      <p class="font-medium text-fg mt-0.5">"${esc(savedRec.transcript)}"</p>
+                    </div>
+                  `
+                      : ''
+                  }
+                  ${
+                    savedRec.audioUrl
+                      ? `
+                    <div class="pt-1">
+                      <div class="text-[11px] text-pink-400 font-semibold mb-1">🎧 Nghe lại giọng thu âm của bạn:</div>
+                      <audio controls playsinline src="${esc(
+                        savedRec.audioUrl
+                      )}" class="w-full h-9 rounded-lg"></audio>
                     </div>
                   `
                       : ''
                   }
                 </div>
               `
+                  : ''
               }
 
-              <!-- THANH ĐIỀU KHIỂN ĐÁY: PHÁT CÂU HIỆN TẠI + CHỈNH TỐC ĐỘ (0.5x - 1.5x) & CHUYỂN CÂU -->
-              <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line/60">
-                <div class="flex flex-wrap items-center gap-1">
-                  <button
-                    type="button"
-                    id="studio-bottom-play-btn"
-                    class="w-9 h-9 rounded-xl bg-pink-500 text-white font-bold flex items-center justify-center hover:bg-pink-600 transition cursor-pointer mr-1"
-                    title="Phát câu hiện tại (Ưu tiên giọng người thật từ Video YouTube kèm chữ chạy sáng thời gian thực)"
-                  >
-                    ▶
-                  </button>
-                  ${[0.5, 0.75, 1, 1.25, 1.5]
-                    .map(
-                      (spd) => `
-                    <button
-                      type="button"
-                      data-studio-speed="${spd}"
-                      class="px-2.5 py-1.5 rounded-lg font-mono text-xs font-bold transition cursor-pointer ${
-                        playbackSpeed === spd
-                          ? 'bg-pink-500/25 border border-pink-500/50 text-pink-300'
-                          : 'bg-inset text-mute hover:text-fg'
-                      }"
-                    >
-                      ${spd}x
-                    </button>
-                  `
-                    )
-                    .join('')}
-                </div>
-
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    id="studio-prev-seg-btn"
-                    class="btn !py-1.5 !px-3 !text-xs whitespace-nowrap"
-                    ${curSegIdx === 0 ? 'disabled' : ''}
-                  >
-                    ← Câu trước
-                  </button>
-                  <button
-                    type="button"
-                    id="studio-next-seg-btn"
-                    class="px-4 py-1.5 rounded-xl bg-pink-500 text-white text-xs font-bold hover:bg-pink-600 transition whitespace-nowrap cursor-pointer"
-                  >
-                    ${curSegIdx < segs.length - 1 ? 'Tiếp theo →' : 'Hoàn thành bài ✓'}
-                  </button>
-                </div>
+              <div class="flex flex-wrap items-center gap-2 pt-1">
+                ${wordSlotsHTML}
               </div>
 
+              ${
+                savedRec && savedRec.total > 0
+                  ? `
+                <div class="pt-2 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    id="studio-open-ai-coach-btn"
+                    class="px-4 py-2 rounded-xl bg-pink-500/20 border border-pink-500/50 text-pink-300 text-xs font-bold hover:bg-pink-500/30 transition cursor-pointer"
+                  >
+                    ✨ Nhờ AI nhận xét phát âm chi tiết
+                  </button>
+                </div>
+              `
+                  : ''
+              }
+            </div>
+
+            <div
+              id="studio-ai-coach-box"
+              class="${
+                savedRec && savedRec.showCoach ? '' : 'hidden'
+              } inset p-4 rounded-2xl border border-pink-500/40 bg-pink-500/5 space-y-3"
+            >
+              <div class="flex items-center justify-between border-b border-line/60 pb-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">🤖</span>
+                  <b class="text-sm text-pink-300">AI Huấn luyện phát âm</b>
+                </div>
+                <button type="button" id="studio-close-ai-coach" class="text-xs text-mute hover:text-fg px-2 py-0.5 rounded border border-line cursor-pointer">Đóng</button>
+              </div>
+              <div id="studio-ai-coach-content">
+                ${savedRec && savedRec.aiCoachHtml ? savedRec.aiCoachHtml : ''}
+              </div>
             </div>
           </div>
+        `
+            : studioMode === 'dictation'
+            ? `
+          <div class="inset p-4 rounded-2xl border border-line/80 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <b class="text-xs text-pri uppercase">⌨️ Nghe Chép Chính Tả Câu #${
+                curSegIdx + 1
+              }</b>
+              <div class="flex items-center gap-1.5">
+                <button type="button" id="studio-dict-hint-btn" class="btn !py-1 !px-2.5 !text-xs">💡 Gợi ý từ tiếp theo</button>
+                <button type="button" id="studio-dict-reveal-btn" class="btn !py-1 !px-2.5 !text-xs">👁️ Hiện/Ẩn câu mẫu</button>
+              </div>
+            </div>
+            <textarea
+              id="studio-dict-input"
+              rows="2"
+              class="inp text-sm font-mono"
+              placeholder="Bấm nút ▶ (giọng người thật) hoặc '🔊 Nghe US' rồi gõ lại chính xác những gì bạn nghe được..."
+            >${esc(savedDictation)}</textarea>
+            <div id="studio-dict-feedback" class="text-xs leading-relaxed">
+              ${
+                dictResult
+                  ? `
+                <div class="space-y-1.5">
+                  <div class="font-mono font-bold ${
+                    dictResult.pct >= 85 ? 'text-emerald-400' : 'text-amber-300'
+                  }">
+                    Độ khớp chính tả: ${dictResult.correctCount}/${dictResult.total} từ (${
+                      dictResult.pct
+                    }%)
+                  </div>
+                  <div class="flex flex-wrap gap-1">${dictResult.html}</div>
+                </div>
+              `
+                  : '<span class="text-mute">Gõ câu bạn nghe được vào ô trên để hệ thống kiểm tra từng từ thời gian thực.</span>'
+              }
+            </div>
+          </div>
+        `
+            : `
+          <div class="space-y-3.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+              <b class="text-xs sm:text-sm text-amber-300 uppercase">🎧 VSTEP Listening Comprehension (${
+                vstepQuestions.length
+              } Questions in English)</b>
+              <span class="text-[11px] text-mute">Chọn đáp án A/B/C/D để xem dịch câu hỏi & giải thích chi tiết</span>
+            </div>
 
+            ${vstepQuestionsHTML}
+
+            ${
+              lesson.speakingPrompt
+                ? `
+              <div class="inset p-4 rounded-2xl border border-pri/30 bg-pri/5 space-y-2 text-xs">
+                <b class="text-pri uppercase">🗣️ Câu hỏi Mở rộng VSTEP Speaking cùng chủ đề:</b>
+                <p class="text-sm font-bold text-fg">${esc(lesson.speakingPrompt.question)}</p>
+                <p class="text-mute">${esc(lesson.speakingPrompt.hintVi)}</p>
+              </div>
+            `
+                : ''
+            }
+          </div>
+        `
+        }
+
+        <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line/60">
+          <div class="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              id="studio-bottom-play-btn"
+              class="w-9 h-9 rounded-xl bg-pink-500 text-white font-bold flex items-center justify-center hover:bg-pink-600 transition cursor-pointer mr-1"
+              title="Phát câu hiện tại kèm hiệu ứng chữ chạy sáng thời gian thực"
+            >
+              ▶
+            </button>
+            ${[0.5, 0.75, 1, 1.25, 1.5]
+              .map(
+                (spd) => `
+              <button
+                type="button"
+                data-studio-speed="${spd}"
+                class="px-2.5 py-1.5 rounded-lg font-mono text-xs font-bold transition cursor-pointer ${
+                  playbackSpeed === spd
+                    ? 'bg-pink-500/25 border border-pink-500/50 text-pink-300'
+                    : 'bg-inset text-mute hover:text-fg'
+                }"
+              >
+                ${spd}x
+              </button>
+            `
+              )
+              .join('')}
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              id="studio-prev-seg-btn"
+              class="btn !py-1.5 !px-3 !text-xs whitespace-nowrap"
+              ${curSegIdx === 0 ? 'disabled' : ''}
+            >
+              ← Câu trước
+            </button>
+            <button
+              type="button"
+              id="studio-next-seg-btn"
+              class="px-4 py-1.5 rounded-xl bg-pink-500 text-white text-xs font-bold hover:bg-pink-600 transition whitespace-nowrap cursor-pointer"
+            >
+              ${curSegIdx < segs.length - 1 ? 'Tiếp theo →' : 'Hoàn thành bài ✓'}
+            </button>
+          </div>
         </div>
       </div>
     `;
+  }
+
+  // Khung Shell Bền Vững: giữ #studio-yt-stage-box cố định 100% trong DOM
+  function render(lv, state) {
+    activeLevel = lv || activeLevel;
+    activeAppState = state || activeAppState;
+    const ctx = getActiveLessonAndSegment(activeLevel);
+    const { lesson } = ctx;
+    const isVideoVisible = mediaTab === 'video' && !!lesson.youtubeId;
+
+    return `
+      <div id="studio-persistent-shell" class="space-y-4">
+        <div id="studio-top-bar-slot" class="card p-3.5 sm:p-4 space-y-3">
+          ${buildTopBarSlotHTML(activeLevel, ctx)}
+        </div>
+
+        <div class="grid lg:grid-cols-12 gap-4 items-start">
+          <div class="lg:col-span-5 card p-4 space-y-3.5">
+            <div id="studio-media-header-slot">
+              ${buildMediaHeaderSlotHTML(ctx)}
+            </div>
+
+            <!-- KHUNG VIDEO YOUTUBE CỐ ĐỊNH VĨNH VIỄN (KHÔNG BAO GIỜ BỊ GHI ĐÈ INNERHTML KHI ĐỔI CÂU / BẤM TỪ) -->
+            <div id="studio-yt-stage-box" class="space-y-2 ${isVideoVisible ? '' : 'hidden'}">
+              <div class="relative rounded-xl overflow-hidden border border-line bg-black aspect-video">
+                <div id="studio-yt-stage" class="w-full h-full"></div>
+              </div>
+              <div id="studio-yt-controls-slot">
+                ${buildYtControlsSlotHTML(ctx)}
+              </div>
+            </div>
+
+            <div id="studio-audio-stage-slot" class="${isVideoVisible ? 'hidden' : ''}">
+              ${buildAudioStageSlotHTML(ctx)}
+            </div>
+
+            <div id="studio-left-subtitles-slot" class="space-y-2">
+              ${buildLeftSubtitlesSlotHTML(ctx)}
+            </div>
+          </div>
+
+          <div id="studio-right-practice-slot" class="lg:col-span-7 space-y-4">
+            ${buildRightPracticeSlotHTML(activeLevel, activeAppState, ctx)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // Cập nhật các vùng giao diện xung quanh mà TUYỆT ĐỐI KHÔNG chạm vào #studio-yt-stage
+  function refreshStudioSlotsWithoutTouchingVideo() {
+    const shell = document.getElementById('studio-persistent-shell');
+    if (!shell) return;
+    const ctx = getActiveLessonAndSegment(activeLevel);
+    const { lesson, startSec } = ctx;
+    const isVideoVisible = mediaTab === 'video' && !!lesson.youtubeId;
+
+    const topSlot = document.getElementById('studio-top-bar-slot');
+    if (topSlot) topSlot.innerHTML = buildTopBarSlotHTML(activeLevel, ctx);
+
+    const mediaHeaderSlot = document.getElementById('studio-media-header-slot');
+    if (mediaHeaderSlot) mediaHeaderSlot.innerHTML = buildMediaHeaderSlotHTML(ctx);
+
+    const ytStageBox = document.getElementById('studio-yt-stage-box');
+    if (ytStageBox) ytStageBox.classList.toggle('hidden', !isVideoVisible);
+
+    const ytControlsSlot = document.getElementById('studio-yt-controls-slot');
+    if (ytControlsSlot) ytControlsSlot.innerHTML = buildYtControlsSlotHTML(ctx);
+
+    const audioStageSlot = document.getElementById('studio-audio-stage-slot');
+    if (audioStageSlot) {
+      audioStageSlot.classList.toggle('hidden', isVideoVisible);
+      audioStageSlot.innerHTML = buildAudioStageSlotHTML(ctx);
+    }
+
+    const leftSubSlot = document.getElementById('studio-left-subtitles-slot');
+    if (leftSubSlot) leftSubSlot.innerHTML = buildLeftSubtitlesSlotHTML(ctx);
+
+    const rightSlot = document.getElementById('studio-right-practice-slot');
+    if (rightSlot) rightSlot.innerHTML = buildRightPracticeSlotHTML(activeLevel, activeAppState, ctx);
+
+    if (isVideoVisible) {
+      mountOrUpdateYouTubePlayer(lesson.youtubeId, startSec);
+    }
+
+    bind(shell.parentElement || document.body, activeLevel, activeAppState);
+  }
+
+  // Được gọi bởi academy-core.js khi module đang hiển thị -> Tránh ghi đè #acad-module-body làm reload iframe
+  function updateView(container, lv, state) {
+    activeLevel = lv || activeLevel;
+    activeAppState = state || activeAppState;
+    if (!container.querySelector('#studio-persistent-shell')) {
+      container.innerHTML = render(activeLevel, activeAppState);
+      bind(container, activeLevel, activeAppState);
+      return;
+    }
+    refreshStudioSlotsWithoutTouchingVideo();
   }
 
   function stopActiveRecording() {
@@ -1884,24 +2402,16 @@
   }
 
   function bind(container, lv, state) {
+    activeLevel = lv || activeLevel;
+    activeAppState = state || activeAppState;
     const esc = global.LexiAcademy.esc;
-    const ctx = getActiveLessonAndSegment(lv);
-    const { lesson, segs, combinedText, startSec, endSec, recKey } = ctx;
+    const ctx = getActiveLessonAndSegment(activeLevel);
+    const { lesson, segs, combinedText, startSec, recKey } = ctx;
     const wordsCount = combinedText.split(/\s+/).filter(Boolean).length;
 
-    // Gắn hoặc cập nhật trình phát YouTube IFrame API (youtube-nocookie.com + strict-origin-when-cross-origin)
     if (mediaTab === 'video' && lesson.youtubeId) {
-      mountOrUpdateYouTubePlayer(lesson.youtubeId, startSec, endSec, combinedText, wordsCount);
+      mountOrUpdateYouTubePlayer(lesson.youtubeId, startSec);
     }
-
-    // Hàm phát câu thông minh: Ưu tiên phát giọng người thật từ Video YouTube (nếu đang mở tab Video), ngược lại phát US Neural
-    const playActiveSegmentPreferredVoice = () => {
-      if (mediaTab === 'video' && lesson.youtubeId) {
-        const ok = playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, combinedText);
-        if (ok) return;
-      }
-      playSentenceUSWithKaraoke(combinedText, wordsCount);
-    };
 
     // 1. Chọn bài học
     const lessonSelect = container.querySelector('#studio-lesson-select');
@@ -1909,11 +2419,12 @@
       lessonSelect.onchange = () => {
         stopActiveRecording();
         clearKaraokeTimer();
+        pauseAllRealMedia();
         curLessonIdx = Number(lessonSelect.value) || 0;
         curSegIdx = 0;
         mergeNext = false;
         activePopoverWord = null;
-        const nextList = getLessonsForLevel(lv);
+        const nextList = getLessonsForLevel(activeLevel);
         const nextLesson = nextList[curLessonIdx];
         mediaTab = nextLesson && nextLesson.youtubeId ? 'video' : 'audio';
         global.LexiAcademy.render();
@@ -1925,21 +2436,19 @@
       btn.onclick = () => {
         stopActiveRecording();
         studioMode = btn.getAttribute('data-studio-mode') || 'shadowing';
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     });
 
-    // 3. Chuyển đổi Video thật / Âm thanh US ở cột trái
+    // 3. Chuyển đổi Video thật / Âm thanh ở cột trái
     container.querySelectorAll('[data-studio-media]').forEach((btn) => {
       btn.onclick = () => {
         clearKaraokeTimer();
         mediaTab = btn.getAttribute('data-studio-media') || 'audio';
-        if (mediaTab === 'audio' && ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
-          try {
-            ytPlayer.pauseVideo();
-          } catch (e) {}
+        if (mediaTab === 'audio') {
+          sendYtCommand('pauseVideo', []);
         }
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     });
 
@@ -1947,7 +2456,7 @@
     container.querySelectorAll('[data-studio-left-tab]').forEach((btn) => {
       btn.onclick = () => {
         leftSubTab = btn.getAttribute('data-studio-left-tab') || 'subtitles';
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     });
 
@@ -1962,77 +2471,61 @@
     if (subsToggle) {
       subsToggle.onchange = () => {
         showLeftSubs = !!subsToggle.checked;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     }
 
-    // 6. Bấm chọn câu #1, #2, #3... ở cột trái -> Phát ngay giọng người thật trong Video (hoặc US Audio) + chạy chữ Karaoke
+    // 6. Bấm chọn câu #1, #2, #3... ở cột trái -> Tua ngay Video / Audio đến đúng câu đó và chạy chữ Karaoke (KHÔNG tải lại Video!)
     container.querySelectorAll('[data-studio-seg]').forEach((card) => {
       card.onclick = () => {
         stopActiveRecording();
         clearKaraokeTimer();
         curSegIdx = Number(card.getAttribute('data-studio-seg')) || 0;
         activePopoverWord = null;
-        global.LexiAcademy.render();
-        const nextCtx = getActiveLessonAndSegment(lv);
-        const nextWordsCount = nextCtx.combinedText.split(/\s+/).filter(Boolean).length;
-        if (mediaTab === 'video' && nextCtx.lesson.youtubeId) {
-          playYouTubeSegmentHumanVoice(
-            nextCtx.startSec,
-            nextCtx.endSec,
-            nextWordsCount,
-            nextCtx.combinedText
-          );
-        } else {
-          playSentenceUSWithKaraoke(nextCtx.combinedText, nextWordsCount);
-        }
+        refreshStudioSlotsWithoutTouchingVideo();
+        scrollActiveSubtitleIntoView();
+        playSentenceOrWordAt(null);
       };
     });
 
     // 7. Nút Đi đến câu đầu & Phát câu hiện tại
-    const jumpFirstBtn = container.querySelector('#studio-jump-first-btn');
-    if (jumpFirstBtn) {
+    container.querySelectorAll('#studio-jump-first-btn').forEach((jumpFirstBtn) => {
       jumpFirstBtn.onclick = () => {
         stopActiveRecording();
         clearKaraokeTimer();
         curSegIdx = 0;
         activePopoverWord = null;
-        global.LexiAcademy.render();
-        const firstCtx = getActiveLessonAndSegment(lv);
-        const firstWordsCount = firstCtx.combinedText.split(/\s+/).filter(Boolean).length;
-        if (mediaTab === 'video' && firstCtx.lesson.youtubeId) {
-          playYouTubeSegmentHumanVoice(
-            firstCtx.startSec,
-            firstCtx.endSec,
-            firstWordsCount,
-            firstCtx.combinedText
-          );
-        } else {
-          playSentenceUSWithKaraoke(firstCtx.combinedText, firstWordsCount);
-        }
+        refreshStudioSlotsWithoutTouchingVideo();
+        scrollActiveSubtitleIntoView();
+        playSentenceOrWordAt(null);
+      };
+    });
+
+    const leftPlayHumanBtn = container.querySelector('#studio-left-play-human-audio');
+    if (leftPlayHumanBtn && lesson.audioUrl) {
+      leftPlayHumanBtn.onclick = () => {
+        seekAndPlayHumanAudioAt(lesson.audioUrl, ctx.startSec, ctx.startSec, ctx.endSec, wordsCount);
       };
     }
 
     const leftPlayUsBtn = container.querySelector('#studio-left-play-us');
     if (leftPlayUsBtn) {
-      leftPlayUsBtn.onclick = () => playSentenceUSWithKaraoke(combinedText, wordsCount);
+      leftPlayUsBtn.onclick = () => playSentenceUSWithKaraoke(combinedText, wordsCount, 0);
     }
 
     const speakUsBtn = container.querySelector('#studio-speak-us-btn');
     if (speakUsBtn) {
-      speakUsBtn.onclick = () => playSentenceUSWithKaraoke(combinedText, wordsCount);
+      speakUsBtn.onclick = () => playSentenceUSWithKaraoke(combinedText, wordsCount, 0);
     }
 
     const bottomPlayBtn = container.querySelector('#studio-bottom-play-btn');
     if (bottomPlayBtn) {
-      bottomPlayBtn.onclick = playActiveSegmentPreferredVoice;
+      bottomPlayBtn.onclick = () => playSentenceOrWordAt(null);
     }
 
     const playYtSegBtn = container.querySelector('#studio-play-yt-seg-btn');
     if (playYtSegBtn) {
-      playYtSegBtn.onclick = () => {
-        playYouTubeSegmentHumanVoice(startSec, endSec, wordsCount, combinedText);
-      };
+      playYtSegBtn.onclick = () => playSentenceOrWordAt(null);
     }
 
     // 8. Nút Ghép câu kế tiếp (1/2 -> 2/2), IPA, Dịch nghĩa
@@ -2043,7 +2536,7 @@
         clearKaraokeTimer();
         mergeNext = !mergeNext;
         activePopoverWord = null;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     }
 
@@ -2051,7 +2544,7 @@
     if (toggleIpaBtn) {
       toggleIpaBtn.onclick = () => {
         showIPA = !showIPA;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     }
 
@@ -2059,25 +2552,22 @@
     if (toggleTransBtn) {
       toggleTransBtn.onclick = () => {
         showTrans = !showTrans;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     }
 
-    // 9. Chạm vào từng từ trên câu để mở Thẻ Từ Điển Nổi (Popover) + Phát âm từ đó + Lưu Kho từ
+    // 9. Chạm vào từng từ trên câu -> Tua ngay Video/Audio đến đúng từ đó + Mở Thẻ Từ Điển Nổi (Popover)
     container.querySelectorAll('[data-studio-word]').forEach((wBtn) => {
       wBtn.onclick = () => {
         const rawW = wBtn.getAttribute('data-studio-word') || '';
-        const wIdx = Number(wBtn.getAttribute('data-studio-word-idx'));
+        const wIdx = Number(wBtn.getAttribute('data-studio-word-idx')) || 0;
         const cleanW = cleanWordToken(rawW);
-        if (cleanW && typeof global.playSingleChunkUS === 'function') {
-          global.playSingleChunkUS(cleanW);
-        }
-        if (activePopoverWord && activePopoverWord.idx === wIdx) {
-          activePopoverWord = null;
-        } else {
-          activePopoverWord = { word: cleanW || rawW, idx: wIdx };
-        }
-        global.LexiAcademy.render();
+
+        activePopoverWord = { word: cleanW || rawW, idx: wIdx };
+        refreshStudioSlotsWithoutTouchingVideo();
+
+        // Tua ngay Video YouTube (hoặc Audio) tới đúng vị trí từ vừa bấm!
+        playSentenceOrWordAt(wIdx);
       };
     });
 
@@ -2085,14 +2575,22 @@
     if (popCloseBtn) {
       popCloseBtn.onclick = () => {
         activePopoverWord = null;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     }
+
+    container.querySelectorAll('[data-pop-seek-word]').forEach((b) => {
+      b.onclick = () => {
+        const wIdx = Number(b.getAttribute('data-pop-seek-word')) || 0;
+        playSentenceOrWordAt(wIdx);
+      };
+    });
 
     container.querySelectorAll('[data-pop-speak]').forEach((b) => {
       b.onclick = () => {
         const w = b.getAttribute('data-pop-speak');
         if (w && typeof global.playSingleChunkUS === 'function') {
+          pauseAllRealMedia();
           global.playSingleChunkUS(w);
         }
       };
@@ -2109,7 +2607,7 @@
             meaning: popSaveWordBtn.getAttribute('data-meaning'),
             example: popSaveWordBtn.getAttribute('data-ex'),
             exampleTrans: popSaveWordBtn.getAttribute('data-extrans'),
-            cefr: lv,
+            cefr: activeLevel,
             topic: lesson.category
           },
           popSaveWordBtn
@@ -2117,7 +2615,7 @@
       };
     }
 
-    // 10. Nút "Tách cụm" (Ẩn/hiện khung 2 chế độ: Đọc cả câu dừng 1.5s giữa các cụm hoặc chọn cụm để nghe)
+    // 10. Nút "Tách cụm"
     const toggleChunkBtn = container.querySelector('#studio-toggle-chunk-btn');
     const chunkBox = container.querySelector('#studio-chunk-box');
     const chunkListEl = container.querySelector('#studio-chunk-list');
@@ -2129,7 +2627,7 @@
       if (!chunkListEl) return;
       chunkListEl.querySelectorAll('[data-studio-chunk-idx]').forEach((b) => {
         b.className =
-          'px-2.5 py-1.5 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 transition font-mono text-xs text-left';
+          'px-2.5 py-1.5 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 transition font-mono text-xs text-left cursor-pointer';
       });
     };
 
@@ -2142,7 +2640,7 @@
       chunkListEl.innerHTML = chunks
         .map(
           (c, i) => `
-          <button type="button" data-studio-chunk-idx="${i}" class="px-2.5 py-1.5 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 transition font-mono text-xs text-left">
+          <button type="button" data-studio-chunk-idx="${i}" class="px-2.5 py-1.5 rounded-lg border border-line bg-inset/80 text-fg hover:border-amber-400/60 transition font-mono text-xs text-left cursor-pointer">
             <span class="text-amber-400 font-bold mr-1">${i + 1}.</span>${esc(c)}
           </button>
           ${i < chunks.length - 1 ? '<span class="text-mute font-mono text-xs">➔</span>' : ''}
@@ -2155,9 +2653,10 @@
           const idx = Number(b.getAttribute('data-studio-chunk-idx'));
           const cTxt = chunks[idx];
           if (!cTxt) return;
+          pauseAllRealMedia();
           resetChunkHighlight();
           b.className =
-            'px-2.5 py-1.5 rounded-lg border border-sky-400 bg-sky-500/20 text-sky-200 ring-2 ring-sky-400/60 transition font-mono text-xs text-left font-bold';
+            'px-2.5 py-1.5 rounded-lg border border-sky-400 bg-sky-500/20 text-sky-200 ring-2 ring-sky-400/60 transition font-mono text-xs text-left font-bold cursor-pointer';
           if (chunkStatusEl) {
             chunkStatusEl.textContent = `🔊 Đang đọc cụm ${idx + 1}/${chunks.length} (US)...`;
           }
@@ -2194,6 +2693,7 @@
 
     if (chunkPlayAllBtn) {
       chunkPlayAllBtn.onclick = () => {
+        pauseAllRealMedia();
         renderChunks();
         if (typeof global.speakShadow === 'function') {
           global.speakShadow(combinedText, {
@@ -2202,7 +2702,7 @@
               const activeB = chunkListEl?.querySelector(`[data-studio-chunk-idx="${idx}"]`);
               if (activeB) {
                 activeB.className =
-                  'px-2.5 py-1.5 rounded-lg border border-sky-400 bg-sky-500/25 text-sky-200 ring-2 ring-sky-400/70 transition font-mono text-xs text-left font-bold';
+                  'px-2.5 py-1.5 rounded-lg border border-sky-400 bg-sky-500/25 text-sky-200 ring-2 ring-sky-400/70 transition font-mono text-xs text-left font-bold cursor-pointer';
               }
               if (chunkStatusEl) {
                 chunkStatusEl.textContent = `🔊 Đang đọc cụm ${idx + 1}/${total} (US)...`;
@@ -2213,7 +2713,7 @@
               const activeB = chunkListEl?.querySelector(`[data-studio-chunk-idx="${idx}"]`);
               if (activeB) {
                 activeB.className =
-                  'px-2.5 py-1.5 rounded-lg border border-emerald-400 bg-emerald-500/25 text-emerald-200 ring-2 ring-emerald-400/70 transition font-mono text-xs text-left font-bold';
+                  'px-2.5 py-1.5 rounded-lg border border-emerald-400 bg-emerald-500/25 text-emerald-200 ring-2 ring-emerald-400/70 transition font-mono text-xs text-left font-bold cursor-pointer';
               }
               if (chunkStatusEl) {
                 chunkStatusEl.textContent = `🎙️ Dừng 1.5s — Hãy nhại lại cụm ${idx + 1}/${total}...`;
@@ -2238,12 +2738,11 @@
       };
     }
 
-    // 11. Bộ Điều Phối Ghi Âm & Nhận Diện Giọng Nói Đa Thiết Bị (iPad/iPhone Safari, Android, Windows/Mac)
+    // 11. Bộ Điều Phối Ghi Âm & Nhận Diện Giọng Nói Đa Thiết Bị
     const finalizeSpokenEvaluation = (spokenTranscript, audioBlobUrl, audioOnlyMode = false) => {
       const cleanSpoken = String(spokenTranscript || '').trim();
       const prevSaved = recordingStore[recKey] || null;
 
-      // Nếu chỉ thu băng nghe lại (hoặc trình duyệt chỉ trả về file âm thanh mà chưa có chữ), tuyệt đối KHÔNG chấm 0% đè lên kết quả
       if (!cleanSpoken && audioBlobUrl) {
         if (prevSaved && prevSaved.wordResults) {
           prevSaved.audioUrl = audioBlobUrl;
@@ -2274,7 +2773,7 @@
             '🎧 Đã lưu băng ghi âm! Để chấm điểm từng từ trên thiết bị này, hãy bấm "🎙️ Nhấn để bắt đầu đọc & chấm điểm" hoặc dùng Mic bàn phím nhé.'
           );
         }
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
         return;
       }
 
@@ -2282,7 +2781,7 @@
         global.LexiAcademy.notify(
           'Chưa nhận diện được giọng nói. Hãy đọc to rõ hơn hoặc chạm vào ô bên dưới rồi dùng Mic 🎙️ trên bàn phím nhé!'
         );
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
         return;
       }
 
@@ -2310,10 +2809,9 @@
         if (allDone) global.LexiAcademy.markDone(lesson.id);
       }
 
-      global.LexiAcademy.render();
+      refreshStudioSlotsWithoutTouchingVideo();
     };
 
-    // Nút 1: Đọc & Chấm điểm phát âm từng từ (Tự động tránh xung đột Micro trên iPad/iPhone Safari, chạy song song trên PC/Android)
     const recToggleBtn = container.querySelector('#studio-rec-toggle-btn');
     if (recToggleBtn) {
       recToggleBtn.onclick = async () => {
@@ -2335,11 +2833,7 @@
         if (typeof global.stopAudioPlayback === 'function') {
           global.stopAudioPlayback();
         }
-        if (ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
-          try {
-            ytPlayer.pauseVideo();
-          } catch (e) {}
-        }
+        pauseAllRealMedia();
 
         liveTranscript = '';
         recordSeconds = 0;
@@ -2350,7 +2844,6 @@
         const SR = global.SpeechRecognition || global.webkitSpeechRecognition;
         const singleChannelMic = isSingleChannelMicDevice();
 
-        // Chỉ bật MediaRecorder song song khi thiết bị hỗ trợ đa kênh Micro (PC Chrome/Edge, Android) hoặc khi trình duyệt không có SR
         if (
           (!singleChannelMic || !SR) &&
           navigator.mediaDevices &&
@@ -2375,8 +2868,8 @@
                 }
                 const finalSpoken =
                   liveTranscript ||
-                  (container.querySelector('#studio-manual-speech-in')
-                    ? container.querySelector('#studio-manual-speech-in').value.trim()
+                  (document.getElementById('studio-manual-speech-in')
+                    ? document.getElementById('studio-manual-speech-in').value.trim()
                     : '');
                 finalizeSpokenEvaluation(finalSpoken, createdAudioUrl, false);
               };
@@ -2426,7 +2919,7 @@
         }
 
         isRecording = true;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
 
         recordTimerId = setInterval(() => {
           recordSeconds++;
@@ -2451,7 +2944,6 @@
       };
     }
 
-    // Nút 2: Thu băng giọng đọc độc lập (Dành cho iPad/iPhone hoặc bất kỳ thiết bị nào muốn thu âm nghe lại mà không mất điểm chấm từ)
     const recAudioOnlyBtn = container.querySelector('#studio-rec-audio-only-btn');
     if (recAudioOnlyBtn) {
       recAudioOnlyBtn.onclick = async () => {
@@ -2463,11 +2955,7 @@
         if (typeof global.stopAudioPlayback === 'function') {
           global.stopAudioPlayback();
         }
-        if (ytPlayer && ytPlayerReady && typeof ytPlayer.pauseVideo === 'function') {
-          try {
-            ytPlayer.pauseVideo();
-          } catch (e) {}
-        }
+        pauseAllRealMedia();
 
         if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
           global.LexiAcademy.notify('Trình duyệt hiện tại không hỗ trợ thu băng trực tiếp.');
@@ -2497,7 +2985,7 @@
             finalizeSpokenEvaluation('', audioUrl, true);
           };
           mediaRecorder.start();
-          global.LexiAcademy.render();
+          refreshStudioSlotsWithoutTouchingVideo();
 
           recordTimerId = setInterval(() => {
             recordSeconds++;
@@ -2516,7 +3004,6 @@
       };
     }
 
-    // Chấm câu từ ô nhập / Mic bàn phím iPad
     const manualSpeechIn = container.querySelector('#studio-manual-speech-in');
     const evalManualBtn = container.querySelector('#studio-eval-manual-btn');
     if (evalManualBtn && manualSpeechIn) {
@@ -2531,17 +3018,16 @@
       };
     }
 
-    // Bấm vào từng thẻ từ Xanh ✓ / Vàng ▲ / Đỏ ✗ để nghe lại cách phát âm chuẩn của từ đó
     container.querySelectorAll('[data-chip-speak]').forEach((chip) => {
       chip.onclick = () => {
         const w = chip.getAttribute('data-chip-speak');
         if (w && typeof global.playSingleChunkUS === 'function') {
+          pauseAllRealMedia();
           global.playSingleChunkUS(w);
         }
       };
     });
 
-    // Mở / Đóng khung AI Huấn luyện phát âm
     const openAiCoachBtn = container.querySelector('#studio-open-ai-coach-btn');
     const closeAiCoachBtn = container.querySelector('#studio-close-ai-coach');
     const aiCoachBox = container.querySelector('#studio-ai-coach-box');
@@ -2594,7 +3080,7 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
       };
     }
 
-    // 12. Chế độ Dictation (Chép chính tả)
+    // 12. Chế độ Dictation
     const dictInput = container.querySelector('#studio-dict-input');
     const dictFeedback = container.querySelector('#studio-dict-feedback');
     const dictHintBtn = container.querySelector('#studio-dict-hint-btn');
@@ -2604,8 +3090,8 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
       dictInput.oninput = () => {
         const val = dictInput.value;
         const draftKey = `lis_dict_${lesson.id}_${curSegIdx}`;
-        if (state && state.drafts) {
-          state.drafts[draftKey] = val;
+        if (activeAppState && activeAppState.drafts) {
+          activeAppState.drafts[draftKey] = val;
           global.LexiAcademy.saveState();
         }
         const cmp = global.LexiAcademy.compareTokens(combinedText, val);
@@ -2638,11 +3124,11 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
     if (dictRevealBtn) {
       dictRevealBtn.onclick = () => {
         showLeftSubs = !showLeftSubs;
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     }
 
-    // 13. Chế độ Nghe VSTEP (Bộ 3-4 câu hỏi Trắc nghiệm Tiếng Anh + Nghe câu bằng chứng)
+    // 13. Chế độ Nghe VSTEP
     container.querySelectorAll('[data-vstep-q]').forEach((btn) => {
       btn.onclick = () => {
         const qIdx = Number(btn.getAttribute('data-vstep-q'));
@@ -2657,7 +3143,7 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
         if (allCorrect) {
           global.LexiAcademy.markDone(lesson.id);
         }
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     });
 
@@ -2668,19 +3154,9 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
         clearKaraokeTimer();
         curSegIdx = Math.max(0, Math.min(segs.length - 1, targetIdx));
         activePopoverWord = null;
-        global.LexiAcademy.render();
-        const evCtx = getActiveLessonAndSegment(lv);
-        const evWordsCount = evCtx.combinedText.split(/\s+/).filter(Boolean).length;
-        if (mediaTab === 'video' && evCtx.lesson.youtubeId) {
-          playYouTubeSegmentHumanVoice(
-            evCtx.startSec,
-            evCtx.endSec,
-            evWordsCount,
-            evCtx.combinedText
-          );
-        } else {
-          playSentenceUSWithKaraoke(evCtx.combinedText, evWordsCount);
-        }
+        refreshStudioSlotsWithoutTouchingVideo();
+        scrollActiveSubtitleIntoView();
+        playSentenceOrWordAt(null);
       };
     });
 
@@ -2691,13 +3167,12 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
         if (typeof global.setAudioPlaybackRate === 'function') {
           global.setAudioPlaybackRate(playbackSpeed);
         }
-        if (ytPlayer && ytPlayerReady && typeof ytPlayer.setPlaybackRate === 'function') {
-          try {
-            ytPlayer.setPlaybackRate(playbackSpeed);
-          } catch (e) {}
+        sendYtCommand('setPlaybackRate', [playbackSpeed]);
+        if (humanAudioEl) {
+          humanAudioEl.playbackRate = playbackSpeed;
         }
         global.LexiAcademy.notify(`Đã chỉnh tốc độ phát: ${playbackSpeed}x`);
-        global.LexiAcademy.render();
+        refreshStudioSlotsWithoutTouchingVideo();
       };
     });
 
@@ -2710,7 +3185,9 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
           clearKaraokeTimer();
           curSegIdx--;
           activePopoverWord = null;
-          global.LexiAcademy.render();
+          refreshStudioSlotsWithoutTouchingVideo();
+          scrollActiveSubtitleIntoView();
+          playSentenceOrWordAt(null);
         }
       };
     }
@@ -2722,11 +3199,13 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
         const step = mergeNext ? 2 : 1;
         if (curSegIdx + step < segs.length) {
           curSegIdx += step;
-          global.LexiAcademy.render();
+          refreshStudioSlotsWithoutTouchingVideo();
+          scrollActiveSubtitleIntoView();
+          playSentenceOrWordAt(null);
         } else {
           global.LexiAcademy.markDone(lesson.id);
           global.LexiAcademy.notify('🎉 Chúc mừng! Bạn đã hoàn thành toàn bộ các câu trong bài học này.');
-          global.LexiAcademy.render();
+          refreshStudioSlotsWithoutTouchingVideo();
         }
       };
     }
@@ -2736,7 +3215,6 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
     return getLessonsForLevel(lv);
   }
 
-  // Xuất hàm dùng chung để module Speaking cũng dùng được bộ chấm thẻ Xanh/Vàng/Đỏ, IPA & Bộ định tuyến Micro Đa Thiết Bị
   global.LexiStudioHelpers = {
     lookupWordInfo,
     cleanWordToken,
@@ -2746,6 +3224,6 @@ Hãy chỉ ra ngắn gọn trong 2-3 gạch đầu dòng:
   };
 
   if (global.LexiAcademy) {
-    global.LexiAcademy.registerModule('listening', { render, bind, getItems });
+    global.LexiAcademy.registerModule('listening', { render, bind, updateView, getItems });
   }
 })(window);
