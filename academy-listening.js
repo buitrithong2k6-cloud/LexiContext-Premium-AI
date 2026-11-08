@@ -128,6 +128,7 @@
   let showTrans = true;
   let showLeftSubs = true;
   let loopSegment = false;
+  let autoAdvanceSubtitles = false; // Mặc định: false = Tự dừng ở cuối mỗi câu để luyện nói ngay; true = Phát liên tục cả bài & tự nhảy phụ đề
   let mergeNext = false; // Ghép câu kế tiếp (1/2 -> 2/2)
   let playbackSpeed = 1.0;
 
@@ -163,7 +164,7 @@
 
   // ============================================================================
   // BỘ ĐIỀU KHIỂN ĐỒNG BỘ KÉP YOUTUBE (postMessage Bridge + YT.Player + Nội suy 50ms)
-  // & TRÌNH PHÁT AUDIO GIỌNG NGƯỜI THẬT (ELLLO MP3)
+  // & TRÌNH PHÁT AUDIO GIỌNG NGƯỜI THẬT (ELLLO MP3 LƯU SẴN TRONG DỰ ÁN)
   // ============================================================================
   let ytApiLoaded = false;
   let ytPlayer = null;
@@ -171,19 +172,21 @@
   let currentYtVideoId = '';
   let ytBridgeListeningBound = false;
   let ytHandshakeTimerId = null;
+  let seekLockUntil = 0; // Khóa chống xung đột khi người dùng vừa bấm chọn câu/từ để tua Video/Audio
   let ytState = {
     currentTime: 0,
     lastSyncTs: 0,
     playerState: -1 // 1 = playing, 2 = paused, 0 = ended
   };
 
-  // Trình phát Audio Giọng Người Thật (dành cho các bài ELLLO có audioUrl)
+  // Trình phát Audio Giọng Người Thật bền vững (dành cho các bài ELLLO có audioUrl)
   let humanAudioEl = null;
+  let currentHumanAudioSrc = '';
 
   // Quản lý đồng bộ Karaoke & theo dõi câu thoại tự động
   let karaokeTimerId = null;
   let activeHighlightedWordIdx = -1;
-  let activeSegmentEndTarget = null; // Nếu người dùng bấm phát riêng 1 câu thì giữ mốc dừng hoặc lặp; nếu bấm Play trên YouTube thì tự động nhảy câu liên tục
+  let activeSegmentEndTarget = null;
 
   function setupYouTubePostMessageListener() {
     if (ytBridgeListeningBound) return;
@@ -209,8 +212,14 @@
 
       if (data.info && typeof data.info === 'object') {
         if (typeof data.info.currentTime === 'number') {
-          ytState.currentTime = data.info.currentTime;
-          ytState.lastSyncTs = Date.now();
+          // Khi vừa ra lệnh tua (seekTo), bỏ qua gói tin currentTime cũ trong 900ms đầu nếu lệch xa mốc đích
+          if (
+            Date.now() >= seekLockUntil ||
+            Math.abs(data.info.currentTime - ytState.currentTime) < 1.2
+          ) {
+            ytState.currentTime = data.info.currentTime;
+            ytState.lastSyncTs = Date.now();
+          }
         }
         if (typeof data.info.playerState === 'number') {
           const prevState = ytState.playerState;
@@ -226,6 +235,12 @@
   }
 
   function sendYtCommand(funcName, args) {
+    const cleanArgs = Array.isArray(args) ? args : [];
+    if (ytPlayer && ytPlayerReady && typeof ytPlayer[funcName] === 'function') {
+      try {
+        ytPlayer[funcName].apply(ytPlayer, cleanArgs);
+      } catch (e) {}
+    }
     const iframe = document.getElementById('studio-yt-player-instance');
     if (iframe && iframe.contentWindow) {
       try {
@@ -233,17 +248,10 @@
           JSON.stringify({
             event: 'command',
             func: funcName,
-            args: Array.isArray(args) ? args : [],
-            id: 'studio-yt-player-instance',
-            channel: 'widget'
+            args: cleanArgs
           }),
           '*'
         );
-      } catch (e) {}
-    }
-    if (ytPlayer && ytPlayerReady && typeof ytPlayer[funcName] === 'function') {
-      try {
-        ytPlayer[funcName].apply(ytPlayer, Array.isArray(args) ? args : []);
       } catch (e) {}
     }
   }
@@ -255,7 +263,7 @@
       iframe.contentWindow.postMessage(
         JSON.stringify({
           event: 'listening',
-          id: 'studio-yt-player-instance',
+          id: 1,
           channel: 'widget'
         }),
         '*'
@@ -264,9 +272,7 @@
         JSON.stringify({
           event: 'command',
           func: 'addEventListener',
-          args: ['onStateChange'],
-          id: 'studio-yt-player-instance',
-          channel: 'widget'
+          args: ['onStateChange']
         }),
         '*'
       );
@@ -274,6 +280,10 @@
   }
 
   function getYouTubeCurrentTime() {
+    if (Date.now() < seekLockUntil) {
+      const elapsedLock = Math.max(0, (Date.now() - ytState.lastSyncTs) / 1000) * (playbackSpeed || 1);
+      return ytState.currentTime + Math.min(0.4, elapsedLock);
+    }
     if (ytPlayer && ytPlayerReady && typeof ytPlayer.getCurrentTime === 'function') {
       try {
         const apiT = Number(ytPlayer.getCurrentTime());
@@ -292,6 +302,9 @@
   }
 
   function getYouTubePlayerState() {
+    if (Date.now() < seekLockUntil) {
+      return 1;
+    }
     if (ytPlayer && ytPlayerReady && typeof ytPlayer.getPlayerState === 'function') {
       try {
         const st = ytPlayer.getPlayerState();
@@ -599,10 +612,15 @@
   }
 
   // Khởi tạo trình phát YouTube đúng 1 lần duy nhất cho mỗi videoId (KHÔNG BAO GIỜ tháo khỏi DOM khi chuyển câu/bấm từ)
+  // Sử dụng tên miền chuẩn www.youtube.com/embed để trình duyệt gửi cookie YouTube Premium của người dùng và hạn chế quảng cáo
   function mountOrUpdateYouTubePlayer(videoId, startSec) {
     setupYouTubePostMessageListener();
     const stageEl = document.getElementById('studio-yt-stage');
     if (!stageEl || !videoId) return;
+
+    if (typeof global.setYouTubeReferrerMode === 'function') {
+      global.setYouTubeReferrerMode();
+    }
 
     const existingIframe = document.getElementById('studio-yt-player-instance');
     if (existingIframe && currentYtVideoId === videoId && stageEl.contains(existingIframe)) {
@@ -650,7 +668,7 @@
     const originQuery = hasValidHttpOrigin
       ? `&origin=${encodeURIComponent(global.location.origin)}`
       : '';
-    iframe.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(
+    iframe.src = `https://www.youtube.com/embed/${encodeURIComponent(
       videoId
     )}?enablejsapi=1&playsinline=1&rel=0&modestbranding=1&start=${Math.floor(
       startSec || 0
@@ -678,7 +696,7 @@
       if (!document.getElementById('studio-yt-player-instance')) return;
       try {
         ytPlayer = new global.YT.Player('studio-yt-player-instance', {
-          host: 'https://www.youtube-nocookie.com',
+          host: 'https://www.youtube.com',
           events: {
             onReady: function () {
               ytPlayerReady = true;
@@ -721,7 +739,9 @@
   }
 
   // Vòng lặp đồng bộ chữ chạy Karaoke 50ms theo thời gian thực của Video YouTube
-  // Tự động nhận diện cả khi người dùng bấm nút Play trực tiếp trên YouTube hoặc bấm chọn câu/từ
+  // Hỗ trợ 2 chế độ rõ ràng:
+  // - Mặc định (!autoAdvanceSubtitles): Tự dừng ở cuối mỗi câu để học viên bấm thu âm & chấm điểm ngay
+  // - Phát liên tục (autoAdvanceSubtitles): Tự động nhảy qua câu tiếp theo theo tiến trình Video
   function ensureContinuousVideoKaraokeLoop() {
     if (karaokeTimerId) clearInterval(karaokeTimerId);
 
@@ -735,25 +755,45 @@
 
       const curT = getYouTubeCurrentTime();
       const pState = getYouTubePlayerState();
+      const wordsArr = combinedText.split(/\s+/).filter(Boolean);
+      const totalWords = Math.max(1, wordsArr.length);
+      const segDur = Math.max(0.8, endSec - startSec);
+      const isSeekLocked = Date.now() < seekLockUntil;
 
-      // 1. Nếu đang phát câu có giới hạn (hoặc bật Lặp lại câu) và chạm mốc kết thúc
-      if (activeSegmentEndTarget !== null && curT >= activeSegmentEndTarget) {
+      // 1. Khi chạm mốc kết thúc câu hiện tại (endSec) và đã qua thời gian khóa tua (seekLockUntil)
+      if (!isSeekLocked && curT >= endSec - 0.04) {
         if (loopSegment) {
+          seekLockUntil = Date.now() + 950;
           sendYtCommand('seekTo', [startSec, true]);
           sendYtCommand('playVideo', []);
           ytState.currentTime = startSec;
           ytState.lastSyncTs = Date.now();
           return;
         }
+        if (!autoAdvanceSubtitles) {
+          // Chế độ mặc định: Tự dừng ở cuối câu để học viên luyện nói / ghi âm ngay
+          sendYtCommand('pauseVideo', []);
+          ytState.playerState = 2;
+          highlightWordAtIndex(
+            totalWords - 1,
+            1,
+            `⏸ Đã dừng cuối câu #${curSegIdx + 1} (${endSec.toFixed(1)}s) — Hãy bấm 🎙️ để đọc & chấm điểm!`
+          );
+          clearInterval(karaokeTimerId);
+          karaokeTimerId = null;
+          return;
+        }
       }
 
-      // 2. Nếu Video đang phát liên tục và vượt sang câu thoại khác trong danh sách #1..#N -> Tự động nhảy câu phụ đề theo Video mà KHÔNG tải lại trình phát!
-      if (pState === 1 && !loopSegment && curT > 0.2) {
-        const matchedIdx = segs.findIndex(
-          (s, idx) =>
-            curT >= Number(s.start) - 0.15 &&
-            curT < Number(s.end) + (idx === segs.length - 1 ? 0.5 : 0.05)
-        );
+      // 2. Chế độ Phát liên tục cả bài (autoAdvanceSubtitles === true): Tự động nhảy sang câu phụ đề tiếp theo theo Video mà KHÔNG tải lại trình phát!
+      if (!isSeekLocked && autoAdvanceSubtitles && pState === 1 && !loopSegment && curT > 0.2) {
+        const matchedIdx = segs.findIndex((s, idx) => {
+          const sStart = Number(s.start) || 0;
+          const nextSegStart =
+            idx + 1 < segs.length ? Number(segs[idx + 1].start) : (Number(s.end) || 0) + 1.5;
+          const sEndWindow = Math.max(Number(s.end) || 0, nextSegStart - 0.05);
+          return curT >= sStart - 0.12 && curT < sEndWindow;
+        });
         if (
           matchedIdx !== -1 &&
           matchedIdx !== curSegIdx &&
@@ -769,10 +809,6 @@
       }
 
       // 3. Tính toán vị trí từ đang đọc (Wave Karaoke Highlight)
-      const wordsArr = combinedText.split(/\s+/).filter(Boolean);
-      const totalWords = Math.max(1, wordsArr.length);
-      const segDur = Math.max(0.8, endSec - startSec);
-
       if (curT >= startSec - 0.25 && curT <= endSec + 0.35) {
         const progress = Math.max(0, Math.min(0.999, (curT - startSec) / segDur));
         const wIdx = Math.floor(progress * totalWords);
@@ -789,15 +825,14 @@
         }
       }
 
-      if (pState === 2 || pState === 0) {
-        // Đã tạm dừng hoặc kết thúc video
+      if (!isSeekLocked && (pState === 2 || pState === 0)) {
         clearInterval(karaokeTimerId);
         karaokeTimerId = null;
       }
     }, 50);
   }
 
-  // Tua & phát Video YouTube ngay tại giây customStartSec (không tải lại iframe!)
+  // Tua & phát Video YouTube ngay tại giây customStartSec (không tải lại iframe, khóa chống nhảy câu sai!)
   function seekAndPlayYouTubeAt(customStartSec, targetEndSec) {
     if (typeof global.stopAudioPlayback === 'function') {
       global.stopAudioPlayback();
@@ -807,24 +842,154 @@
         humanAudioEl.pause();
       } catch (e) {}
     }
+    if (typeof global.setYouTubeReferrerMode === 'function') {
+      global.setYouTubeReferrerMode();
+    }
 
     const sSec = Math.max(0, Number(customStartSec) || 0);
     activeSegmentEndTarget = typeof targetEndSec === 'number' ? targetEndSec : null;
+    seekLockUntil = Date.now() + 1200;
+
+    ytState.currentTime = sSec;
+    ytState.lastSyncTs = Date.now();
+    ytState.playerState = 1;
 
     sendYtListeningHandshake();
     sendYtCommand('setPlaybackRate', [playbackSpeed]);
     sendYtCommand('seekTo', [sSec, true]);
     sendYtCommand('playVideo', []);
 
-    ytState.currentTime = sSec;
-    ytState.lastSyncTs = Date.now();
-    ytState.playerState = 1;
+    // Gửi lặp lệnh seekTo sau 160ms để đảm bảo iPad Safari / YouTube IFrame nhận đúng giây kể cả khi vừa thoát trạng thái Pause
+    setTimeout(() => {
+      if (Math.abs(ytState.currentTime - sSec) < 1.5) {
+        sendYtCommand('seekTo', [sSec, true]);
+        sendYtCommand('playVideo', []);
+      }
+    }, 160);
 
     ensureContinuousVideoKaraokeLoop();
     return true;
   }
 
-  // Phát câu hoặc từ bằng File Audio Giọng Người Thật trực tiếp (ELLLO MP3) kèm chữ chạy Karaoke
+  // Khởi tạo và gắn thẻ <audio controls> bền vững cho bài nghe ELLLO (MP3 giọng người thật lưu sẵn trong dự án)
+  function mountOrUpdateHumanAudioElement(audioUrl) {
+    if (!audioUrl) return null;
+    if (!humanAudioEl) {
+      humanAudioEl = document.createElement('audio');
+      humanAudioEl.id = 'studio-human-audio-player';
+      humanAudioEl.controls = true;
+      humanAudioEl.preload = 'auto';
+      humanAudioEl.setAttribute('playsinline', 'true');
+      humanAudioEl.setAttribute('webkit-playsinline', 'true');
+      humanAudioEl.className = 'w-full h-10 rounded-xl';
+
+      humanAudioEl.addEventListener('play', () => {
+        sendYtCommand('pauseVideo', []);
+        ensureContinuousHumanAudioKaraokeLoop();
+      });
+    }
+
+    if (currentHumanAudioSrc !== audioUrl) {
+      currentHumanAudioSrc = audioUrl;
+      humanAudioEl.src = audioUrl;
+      try {
+        humanAudioEl.load();
+      } catch (e) {}
+    }
+    humanAudioEl.playbackRate = playbackSpeed || 1.0;
+
+    const mountBox = document.getElementById('studio-human-audio-mount');
+    if (mountBox && !mountBox.contains(humanAudioEl)) {
+      mountBox.innerHTML = '';
+      mountBox.appendChild(humanAudioEl);
+    }
+    return humanAudioEl;
+  }
+
+  // Vòng lặp 50ms đồng bộ Karaoke & Phụ đề cho Trình phát Audio Giọng Người Thật (ELLLO MP3)
+  function ensureContinuousHumanAudioKaraokeLoop() {
+    if (karaokeTimerId) clearInterval(karaokeTimerId);
+
+    karaokeTimerId = setInterval(() => {
+      if (!humanAudioEl || humanAudioEl.paused) {
+        clearInterval(karaokeTimerId);
+        karaokeTimerId = null;
+        return;
+      }
+
+      const curT = Number(humanAudioEl.currentTime) || 0;
+      const ctx = getActiveLessonAndSegment(activeLevel);
+      const { lesson, segs, combinedText, startSec, endSec } = ctx;
+      if (!lesson || !lesson.audioUrl) {
+        clearKaraokeTimer();
+        return;
+      }
+
+      const wordsArr = combinedText.split(/\s+/).filter(Boolean);
+      const totalWords = Math.max(1, wordsArr.length);
+      const segDur = Math.max(0.8, endSec - startSec);
+      const isSeekLocked = Date.now() < seekLockUntil;
+
+      // 1. Khi chạm mốc kết thúc câu hiện tại (endSec)
+      if (!isSeekLocked && curT >= endSec - 0.04) {
+        if (loopSegment) {
+          seekLockUntil = Date.now() + 600;
+          try {
+            humanAudioEl.currentTime = startSec;
+          } catch (e) {}
+          return;
+        }
+        if (!autoAdvanceSubtitles) {
+          try {
+            humanAudioEl.pause();
+          } catch (e) {}
+          highlightWordAtIndex(
+            totalWords - 1,
+            1,
+            `⏸ Đã dừng cuối câu #${curSegIdx + 1} (${endSec.toFixed(1)}s) — Hãy bấm 🎙️ để đọc & chấm điểm!`
+          );
+          clearInterval(karaokeTimerId);
+          karaokeTimerId = null;
+          return;
+        }
+      }
+
+      // 2. Chế độ Phát liên tục cả bài (autoAdvanceSubtitles === true): tự động nhảy sang câu tiếp theo
+      if (!isSeekLocked && autoAdvanceSubtitles && !loopSegment) {
+        const matchedIdx = segs.findIndex((s, idx) => {
+          const sStart = Number(s.start) || 0;
+          const nextSegStart =
+            idx + 1 < segs.length ? Number(segs[idx + 1].start) : (Number(s.end) || 0) + 1.5;
+          const sEndWindow = Math.max(Number(s.end) || 0, nextSegStart - 0.05);
+          return curT >= sStart - 0.1 && curT < sEndWindow;
+        });
+        if (
+          matchedIdx !== -1 &&
+          matchedIdx !== curSegIdx &&
+          !(mergeNext && matchedIdx === curSegIdx + 1)
+        ) {
+          curSegIdx = matchedIdx;
+          activePopoverWord = null;
+          refreshStudioSlotsWithoutTouchingVideo();
+          scrollActiveSubtitleIntoView();
+          return;
+        }
+      }
+
+      // 3. Làm sáng từng từ (Wave Karaoke Highlight) theo thời gian thực của file MP3 người thật
+      if (curT >= startSec - 0.2 && curT <= endSec + 0.25) {
+        const progress = Math.max(0, Math.min(0.999, (curT - startSec) / segDur));
+        const wIdx = Math.floor(progress * totalWords);
+        highlightWordAtIndex(
+          wIdx,
+          progress,
+          `🎧 Giọng người thật #${curSegIdx + 1}: ${curT.toFixed(1)}s / ${endSec.toFixed(1)}s`
+        );
+      }
+    }, 50);
+  }
+
+  // Phát câu hoặc từ bằng File Audio Giọng Người Thật trực tiếp (ELLLO MP3 trong dự án) kèm chữ chạy Karaoke
   function seekAndPlayHumanAudioAt(audioUrl, customStartSec, startSec, endSec, totalWords) {
     clearKaraokeTimer();
     if (typeof global.stopAudioPlayback === 'function') {
@@ -832,97 +997,52 @@
     }
     sendYtCommand('pauseVideo', []);
 
-    if (!humanAudioEl) {
-      humanAudioEl = new Audio();
-      humanAudioEl.preload = 'auto';
+    const audioEl = mountOrUpdateHumanAudioElement(audioUrl);
+    if (!audioEl) {
+      const ctx = getActiveLessonAndSegment(activeLevel);
+      playSentenceUSWithKaraoke(ctx.combinedText, totalWords, 0);
+      return;
     }
-    if (humanAudioEl.src !== audioUrl) {
-      humanAudioEl.src = audioUrl;
-    }
-    humanAudioEl.playbackRate = playbackSpeed || 1.0;
 
     const sSec = Math.max(0, Number(customStartSec) || 0);
-    const segStart = Math.max(0, Number(startSec) || 0);
-    const segEnd = Math.max(segStart + 1.2, Number(endSec) || segStart + 5);
-    const segDur = segEnd - segStart;
-    const wordsCount = Math.max(1, Number(totalWords) || 1);
+    seekLockUntil = Date.now() + 650;
 
     const startPlayback = () => {
       try {
-        humanAudioEl.currentTime = sSec;
+        audioEl.currentTime = sSec;
       } catch (e) {}
-      humanAudioEl
-        .play()
-        .then(() => {
-          karaokeTimerId = setInterval(() => {
-            if (!humanAudioEl || humanAudioEl.paused) {
-              clearKaraokeTimer();
-              return;
-            }
-            const curT = humanAudioEl.currentTime || 0;
+      audioEl.playbackRate = playbackSpeed || 1.0;
+      const playPromise = audioEl.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            ensureContinuousHumanAudioKaraokeLoop();
+          })
+          .catch(() => {
             const ctx = getActiveLessonAndSegment(activeLevel);
-            const segs = ctx.segs || [];
-
-            // Tự động nhảy câu nếu file audio phát liên tục sang câu kế tiếp
-            if (!loopSegment && curT > segEnd + 0.15) {
-              const nextIdx = segs.findIndex(
-                (s) => curT >= Number(s.start) - 0.1 && curT <= Number(s.end) + 0.1
-              );
-              if (nextIdx !== -1 && nextIdx !== curSegIdx) {
-                curSegIdx = nextIdx;
-                activePopoverWord = null;
-                refreshStudioSlotsWithoutTouchingVideo();
-                scrollActiveSubtitleIntoView();
-                return;
-              }
-            }
-
-            const curCtx = getActiveLessonAndSegment(activeLevel);
-            const cStart = curCtx.startSec;
-            const cEnd = curCtx.endSec;
-            const cDur = Math.max(0.8, cEnd - cStart);
-            const cWords = Math.max(
-              1,
-              curCtx.combinedText.split(/\s+/).filter(Boolean).length
-            );
-
-            if (curT >= cStart - 0.2 && curT <= cEnd + 0.25) {
-              const progress = Math.max(0, Math.min(0.999, (curT - cStart) / cDur));
-              const wIdx = Math.floor(progress * cWords);
-              highlightWordAtIndex(
-                wIdx,
-                progress,
-                `🎧 Giọng người thật: ${curT.toFixed(1)}s / ${cEnd.toFixed(1)}s`
-              );
-            }
-
-            if (loopSegment && curT >= cEnd) {
-              humanAudioEl.currentTime = cStart;
-            }
-          }, 50);
-        })
-        .catch(() => {
-          // Dự phòng sang Giọng US Neural nếu mạng chặn file MP3 ngoài
-          const ctx = getActiveLessonAndSegment(activeLevel);
-          playSentenceUSWithKaraoke(ctx.combinedText, wordsCount);
-        });
+            playSentenceUSWithKaraoke(ctx.combinedText, totalWords, 0);
+          });
+      } else {
+        ensureContinuousHumanAudioKaraokeLoop();
+      }
     };
 
-    if (humanAudioEl.readyState >= 1) {
+    if (audioEl.readyState >= 1) {
       startPlayback();
     } else {
-      humanAudioEl.onloadedmetadata = () => {
-        humanAudioEl.onloadedmetadata = null;
+      audioEl.onloadedmetadata = () => {
+        audioEl.onloadedmetadata = null;
         startPlayback();
       };
-      humanAudioEl.onerror = () => {
+      audioEl.onerror = () => {
         const ctx = getActiveLessonAndSegment(activeLevel);
-        playSentenceUSWithKaraoke(ctx.combinedText, wordsCount);
+        playSentenceUSWithKaraoke(ctx.combinedText, totalWords, 0);
       };
     }
   }
 
-  // Phát câu hiện tại bằng Giọng Chuẩn Mỹ (🔊 Nghe US) kèm hiệu ứng Sóng Karaoke thời gian thực
+  // Phát câu hiện tại bằng Giọng Chuẩn Mỹ (🔊 Nghe US) kèm hiệu ứng Sóng Karaoke đồng bộ chính xác theo từng cụm thở (breath chunks)
+  // Được dùng cho các câu dài không có trong Video YouTube / MP3 ELLLO hoặc khi người dùng bấm trực tiếp nút "🔊 Nghe US"
   function playSentenceUSWithKaraoke(text, wordsCount, startFromWordIdx) {
     clearKaraokeTimer();
     pauseAllRealMedia();
@@ -943,33 +1063,56 @@
         : text;
     const remainingWords = Math.max(1, totalWords - offsetWordIdx);
 
-    const startTs = Date.now();
-    const estimatedDurationMs = Math.max(1200, (remainingWords * 360) / (playbackSpeed || 1));
+    // Tính phạm vi từ của từng cụm thở (breath chunk) để đồng bộ Karaoke chính xác 100% khi đọc câu dài nhiều cụm
+    const chunks =
+      typeof global.splitIntoBreathChunks === 'function'
+        ? global.splitIntoBreathChunks(spokenSliceText)
+        : [spokenSliceText];
+    const chunkBounds = [];
+    let runningWordOffset = offsetWordIdx;
+    chunks.forEach((cTxt) => {
+      const cWordsCount = Math.max(1, String(cTxt || '').trim().split(/\s+/).filter(Boolean).length);
+      chunkBounds.push({
+        startWord: runningWordOffset,
+        wordCount: cWordsCount
+      });
+      runningWordOffset += cWordsCount;
+    });
+
+    let activeChunkIndex = 0;
+    let chunkStartTs = Date.now();
 
     karaokeTimerId = setInterval(() => {
       const sharedAudio =
         typeof global.getSharedAudioElement === 'function' ? global.getSharedAudioElement() : null;
-      let localProgress = 0;
+      const curBound = chunkBounds[activeChunkIndex] || {
+        startWord: offsetWordIdx,
+        wordCount: remainingWords
+      };
+      const estChunkMs = Math.max(700, (curBound.wordCount * 340) / (playbackSpeed || 1));
+
+      let chunkProgress = 0;
       if (
         sharedAudio &&
         !sharedAudio.paused &&
         sharedAudio.duration &&
         isFinite(sharedAudio.duration) &&
-        sharedAudio.duration > 0.25
+        sharedAudio.duration > 0.2
       ) {
-        localProgress = Math.max(
+        chunkProgress = Math.max(
           0,
           Math.min(0.999, sharedAudio.currentTime / sharedAudio.duration)
         );
       } else {
-        const elapsed = Date.now() - startTs;
-        localProgress = Math.max(0, Math.min(0.999, elapsed / estimatedDurationMs));
+        const elapsed = Date.now() - chunkStartTs;
+        chunkProgress = Math.max(0, Math.min(0.999, elapsed / estChunkMs));
       }
+
       const wIdx = Math.min(
         totalWords - 1,
-        offsetWordIdx + Math.floor(localProgress * remainingWords)
+        curBound.startWord + Math.floor(chunkProgress * curBound.wordCount)
       );
-      const overallProgress = (offsetWordIdx + localProgress * remainingWords) / totalWords;
+      const overallProgress = (wIdx + chunkProgress) / totalWords;
       highlightWordAtIndex(
         wIdx,
         overallProgress,
@@ -979,6 +1122,10 @@
 
     if (typeof global.speakUS === 'function') {
       global.speakUS(spokenSliceText, {
+        onChunkStart: (cIdx) => {
+          activeChunkIndex = Number(cIdx) || 0;
+          chunkStartTs = Date.now();
+        },
         onComplete: () => {
           highlightWordAtIndex(totalWords - 1, 1, '✓ Đã đọc xong câu chuẩn US');
           setTimeout(() => {
@@ -992,7 +1139,10 @@
     }
   }
 
-  // Phát câu hoặc từ theo nguồn ưu tiên (Video YouTube -> Audio người thật ELLLO -> Giọng chuẩn US)
+  // Phát câu hoặc từ theo nguồn ưu tiên tuyệt đối:
+  // 1. Video YouTube gốc (nếu bài có youtubeId)
+  // 2. File MP3 Giọng Người Thật ELLLO lưu sẵn trong dự án (nếu bài có audioUrl)
+  // 3. Giọng Chuẩn Mỹ US Neural (cho các bài Y khoa / Học thuật không có video/mp3)
   function playSentenceOrWordAt(wordIdxOrNull) {
     const ctx = getActiveLessonAndSegment(activeLevel);
     const { lesson, combinedText, startSec, endSec } = ctx;
@@ -1004,12 +1154,11 @@
     const targetSec = isWordJump
       ? Math.max(startSec, startSec + (wordIdxOrNull / totalWords) * segDur - 0.12)
       : startSec;
+    const initIdx = isWordJump ? wordIdxOrNull : 0;
+    const initProg = initIdx / totalWords;
 
     if (mediaTab === 'video' && lesson.youtubeId) {
       seekAndPlayYouTubeAt(targetSec, endSec);
-      // Hiển thị ngay từ vừa bấm trên thanh Karaoke trong lúc chờ khung hình video nhảy tới
-      const initIdx = isWordJump ? wordIdxOrNull : 0;
-      const initProg = initIdx / totalWords;
       highlightWordAtIndex(
         initIdx,
         initProg,
@@ -1020,6 +1169,11 @@
 
     if (lesson.audioUrl) {
       seekAndPlayHumanAudioAt(lesson.audioUrl, targetSec, startSec, endSec, totalWords);
+      highlightWordAtIndex(
+        initIdx,
+        initProg,
+        `🎧 Đang phát giọng người thật #${curSegIdx + 1} tại ${targetSec.toFixed(1)}s...`
+      );
       return;
     }
 
@@ -1405,13 +1559,31 @@
     const { startSec, endSec } = ctx;
     return `
       <div class="flex flex-wrap items-center justify-between gap-1.5">
-        <button
-          type="button"
-          id="studio-jump-first-btn"
-          class="px-2.5 py-1.5 rounded-lg border border-line bg-inset text-fg text-[11px] font-semibold hover:border-pri whitespace-nowrap cursor-pointer"
-        >
-          ⏮ Đi đến câu #1
-        </button>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            id="studio-jump-first-btn"
+            class="px-2.5 py-1.5 rounded-lg border border-line bg-inset text-fg text-[11px] font-semibold hover:border-pri whitespace-nowrap cursor-pointer"
+          >
+            ⏮ Câu #1
+          </button>
+          <button
+            type="button"
+            data-studio-toggle-auto-advance="1"
+            class="px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+              autoAdvanceSubtitles
+                ? 'border-amber-400/60 bg-amber-500/20 text-amber-300'
+                : 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300'
+            }"
+            title="Chuyển đổi giữa Tự dừng ở cuối mỗi câu (để luyện nói ngay) và Phát liên tục cả bài (tự động nhảy câu phụ đề)"
+          >
+            ${
+              autoAdvanceSubtitles
+                ? '▶ Phát liên tục cả bài (Tự nhảy câu)'
+                : '⏸ Tự dừng cuối câu (Luyện nói)'
+            }
+          </button>
+        </div>
         <button
           type="button"
           id="studio-play-yt-seg-btn"
@@ -1431,11 +1603,13 @@
           <div>
             <div class="text-[11px] font-mono text-pink-400 font-bold">
               CÂU #${curSegIdx + 1}${mergeNext ? ' + #' + (curSegIdx + 2) : ''} · ${
-      lesson.audioUrl ? 'GIỌNG NGƯỜI THẬT ELLLO & CHUẨN MỸ' : 'CHUẨN MỸ (US NEURAL)'
+      lesson.audioUrl
+        ? '🎧 GIỌNG NGƯỜI THẬT ELLLO (MP3 GỐC TRONG DỰ ÁN)'
+        : '🔊 ÂM THANH CHUẨN MỸ (US NEURAL)'
     }
             </div>
             <div class="text-xs text-mute mt-0.5">
-              Tốc độ: <b class="font-mono text-fg">${playbackSpeed}x</b> · Mốc: <span class="font-mono">${startSec}s – ${endSec}s</span>
+              Tốc độ: <b class="font-mono text-fg">${playbackSpeed}x</b> · Mốc câu: <span class="font-mono text-emerald-400 font-semibold">${startSec}s – ${endSec}s</span>
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-1.5">
@@ -1453,9 +1627,9 @@
               <button
                 type="button"
                 id="studio-left-play-human-audio"
-                class="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-xs font-bold hover:bg-pink-500 whitespace-nowrap cursor-pointer"
+                class="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-xs font-bold hover:bg-pink-500 whitespace-nowrap cursor-pointer shadow"
               >
-                ▶ Giọng người thật (#${curSegIdx + 1})
+                ▶ Phát giọng người thật #${curSegIdx + 1} (${startSec}s–${endSec}s)
               </button>
             `
                 : ''
@@ -1464,11 +1638,43 @@
               type="button"
               id="studio-left-play-us"
               class="btn btn-pri !py-1.5 !px-3 !text-xs font-bold whitespace-nowrap"
+              title="Đọc câu này bằng giọng chuẩn Mỹ (US)"
             >
               🔊 Nghe US
             </button>
           </div>
         </div>
+
+        ${
+          lesson.audioUrl
+            ? `
+          <div class="space-y-2 pt-2 border-t border-line/50">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-[11px] text-emerald-400 font-semibold">
+                🎵 Trình phát MP3 Giọng Người Thật (Bấm câu bất kỳ bên dưới để tua ngay đến câu đó):
+              </span>
+              <button
+                type="button"
+                data-studio-toggle-auto-advance="1"
+                class="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+                  autoAdvanceSubtitles
+                    ? 'border-amber-400/60 bg-amber-500/20 text-amber-300'
+                    : 'border-emerald-400/60 bg-emerald-500/15 text-emerald-300'
+                }"
+              >
+                ${
+                  autoAdvanceSubtitles
+                    ? '▶ Phát liên tục cả bài (Tự nhảy câu)'
+                    : '⏸ Tự dừng cuối câu (Luyện nói)'
+                }
+              </button>
+            </div>
+            <div id="studio-human-audio-mount" class="w-full"></div>
+          </div>
+        `
+            : ''
+        }
+
         ${
           lesson.youtubeId
             ? `<div class="text-[11px] text-mute flex items-center justify-between pt-1 border-t border-line/40">
@@ -2363,6 +2569,8 @@
 
     if (isVideoVisible) {
       mountOrUpdateYouTubePlayer(lesson.youtubeId, startSec);
+    } else if (lesson.audioUrl) {
+      mountOrUpdateHumanAudioElement(lesson.audioUrl);
     }
 
     bind(shell.parentElement || document.body, activeLevel, activeAppState);
@@ -2411,6 +2619,8 @@
 
     if (mediaTab === 'video' && lesson.youtubeId) {
       mountOrUpdateYouTubePlayer(lesson.youtubeId, startSec);
+    } else if (lesson.audioUrl) {
+      mountOrUpdateHumanAudioElement(lesson.audioUrl);
     }
 
     // 1. Chọn bài học
@@ -2460,13 +2670,24 @@
       };
     });
 
-    // 5. Công tắc Lặp lại câu & Hiện chữ
+    // 5. Công tắc Lặp lại câu, Tự dừng cuối câu / Phát liên tục cả bài & Hiện chữ
     const loopToggle = container.querySelector('#studio-loop-toggle');
     if (loopToggle) {
       loopToggle.onchange = () => {
         loopSegment = !!loopToggle.checked;
       };
     }
+    container.querySelectorAll('[data-studio-toggle-auto-advance]').forEach((btn) => {
+      btn.onclick = () => {
+        autoAdvanceSubtitles = !autoAdvanceSubtitles;
+        global.LexiAcademy.notify(
+          autoAdvanceSubtitles
+            ? '▶ Đã bật: Phát liên tục cả bài & tự động nhảy câu phụ đề theo Video/Audio.'
+            : '⏸ Đã bật: Tự dừng ở cuối mỗi câu để bạn thu âm & chấm điểm ngay.'
+        );
+        refreshStudioSlotsWithoutTouchingVideo();
+      };
+    });
     const subsToggle = container.querySelector('#studio-subs-toggle');
     if (subsToggle) {
       subsToggle.onchange = () => {
